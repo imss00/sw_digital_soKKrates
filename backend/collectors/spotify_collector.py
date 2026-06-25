@@ -1,0 +1,155 @@
+from datetime import datetime, timezone
+
+import spotipy
+from sqlalchemy.orm import Session
+
+from backend.models.spotify_history import SpotifyHistory
+from backend.models.user import User
+from backend.config import settings
+
+
+def _refresh_spotify_token(user: User, db: Session) -> str | None:
+    """access_token 만료 시 refresh_token으로 갱신"""
+    import httpx
+
+    if user.spotify_access_token and user.spotify_token_expires_at:
+        if datetime.now(timezone.utc) < user.spotify_token_expires_at:
+            return user.spotify_access_token
+
+    if not user.spotify_refresh_token:
+        return None
+
+    resp = httpx.post("https://accounts.spotify.com/api/token", data={
+        "grant_type": "refresh_token",
+        "refresh_token": user.spotify_refresh_token,
+        "client_id": settings.spotify_client_id,
+        "client_secret": settings.spotify_client_secret,
+    })
+
+    if resp.status_code != 200:
+        return None
+
+    tokens = resp.json()
+    from datetime import timedelta
+    user.spotify_access_token = tokens["access_token"]
+    user.spotify_token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=tokens.get("expires_in", 3600))
+    if "refresh_token" in tokens:
+        user.spotify_refresh_token = tokens["refresh_token"]
+    db.commit()
+
+    return tokens["access_token"]
+
+
+def collect_spotify(user_id: int, db: Session) -> dict:
+    """Spotify 최근 재생 기록 수집"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user or not user.spotify_refresh_token:
+        return {"status": "skip", "reason": "no spotify token"}
+
+    access_token = _refresh_spotify_token(user, db)
+    if not access_token:
+        return {"status": "error", "reason": "token refresh failed"}
+
+    sp = spotipy.Spotify(auth=access_token)
+
+    try:
+        kwargs = {"limit": 50}
+        if user.spotify_last_cursor_ms:
+            kwargs["after"] = user.spotify_last_cursor_ms
+        results = sp.current_user_recently_played(**kwargs)
+    except spotipy.exceptions.SpotifyException as e:
+        return {"status": "error", "reason": str(e)}
+
+    items = results.get("items", [])
+    if not items:
+        return {"status": "ok", "inserted": 0, "reason": "no new tracks"}
+
+    track_ids = []
+    artist_ids = set()
+    records = []
+
+    for item in items:
+        track = item["track"]
+        track_ids.append(track["id"])
+        for artist in track["artists"]:
+            artist_ids.add(artist["id"])
+
+        records.append({
+            "spotify_track_id": track["id"],
+            "track_name": track["name"],
+            "artist_name": ", ".join(a["name"] for a in track["artists"]),
+            "artist_id": track["artists"][0]["id"],
+            "album_name": track["album"]["name"],
+            "played_at": item["played_at"],
+            "duration_ms": track["duration_ms"],
+        })
+
+    # audio features (may be deprecated for new apps)
+    features_map = {}
+    try:
+        features = sp.audio_features(track_ids)
+        if features:
+            for f in features:
+                if f:
+                    features_map[f["id"]] = f
+    except Exception:
+        pass
+
+    # artist genres (cache within this call)
+    genres_map = {}
+    for aid in artist_ids:
+        try:
+            artist = sp.artist(aid)
+            genres_map[aid] = artist.get("genres", [])
+        except Exception:
+            genres_map[aid] = []
+
+    inserted = 0
+    max_played_at_ms = user.spotify_last_cursor_ms or 0
+
+    for rec in records:
+        played_dt = datetime.fromisoformat(rec["played_at"].replace("Z", "+00:00"))
+        played_ms = int(played_dt.timestamp() * 1000)
+
+        existing = (
+            db.query(SpotifyHistory)
+            .filter_by(
+                user_id=user_id,
+                spotify_track_id=rec["spotify_track_id"],
+                played_at=played_dt,
+            )
+            .first()
+        )
+        if existing:
+            if played_ms > max_played_at_ms:
+                max_played_at_ms = played_ms
+            continue
+
+        feat = features_map.get(rec["spotify_track_id"], {})
+        entry = SpotifyHistory(
+            user_id=user_id,
+            spotify_track_id=rec["spotify_track_id"],
+            track_name=rec["track_name"],
+            artist_name=rec["artist_name"],
+            artist_id=rec["artist_id"],
+            album_name=rec["album_name"],
+            played_at=played_dt,
+            duration_ms=rec["duration_ms"],
+            valence=feat.get("valence"),
+            energy=feat.get("energy"),
+            danceability=feat.get("danceability"),
+            tempo=feat.get("tempo"),
+            acousticness=feat.get("acousticness"),
+            instrumentalness=feat.get("instrumentalness"),
+            genres=genres_map.get(rec["artist_id"], []),
+        )
+        db.add(entry)
+        inserted += 1
+
+        if played_ms > max_played_at_ms:
+            max_played_at_ms = played_ms
+
+    # 커서 업데이트 — 다음 폴링에서 이 시점 이후만 가져옴
+    user.spotify_last_cursor_ms = max_played_at_ms
+    db.commit()
+    return {"status": "ok", "inserted": inserted}
