@@ -41,9 +41,12 @@ def normalize_chrome(record: BrowsingHistory) -> dict | None:
 
 def normalize_spotify(record: SpotifyHistory) -> dict | None:
     genres_str = ", ".join(record.genres) if record.genres else ""
-    content = f"{record.track_name} - {record.artist_name}"
+    parts = [f"{record.track_name} - {record.artist_name}"]
+    if record.album_name:
+        parts.append(f"앨범: {record.album_name}")
     if genres_str:
-        content += f" ({genres_str})"
+        parts.append(f"장르: {genres_str}")
+    content = ". ".join(parts)
 
     return {
         "source": "spotify",

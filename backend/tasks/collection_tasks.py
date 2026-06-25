@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 from backend.tasks.celery_app import celery_app
 from backend.database import SessionLocal
@@ -40,7 +40,7 @@ def normalize_and_trigger():
     db = SessionLocal()
     try:
         from backend.normalizer.normalize import normalize_daily
-        result = normalize_daily(user_id=1, target_date=date.today(), db=db)
+        result = normalize_daily(user_id=1, target_date=date.today() - timedelta(days=1), db=db)
 
         # TODO: Phase 2 분석 파이프라인 호출
         # from backend.tasks.analysis_tasks import run_analysis

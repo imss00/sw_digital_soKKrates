@@ -5,6 +5,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, UploadFile, File
 from sqlalchemy.orm import Session
 
+from backend.config import settings
 from backend.database import get_db
 from backend.models.youtube_history import YouTubeHistory
 
@@ -23,6 +24,8 @@ async def upload_takeout(file: UploadFile = File(...), db: Session = Depends(get
     data = json.loads(content)
 
     inserted = 0
+    new_video_ids = []
+
     for entry in data:
         title = entry.get("title", "")
         if title.startswith("Watched "):
@@ -44,16 +47,31 @@ async def upload_takeout(file: UploadFile = File(...), db: Session = Depends(get
         if subtitles:
             channel_name = subtitles[0].get("name")
 
-        record = YouTubeHistory(
-            user_id=1,  # TODO: JWT에서 user_id 추출
+        existing = (
+            db.query(YouTubeHistory)
+            .filter_by(user_id=1, video_id=video_id, watched_at=watched_at)
+            .first()
+        )
+        if existing:
+            continue
+
+        db.add(YouTubeHistory(
+            user_id=1,
             video_id=video_id,
             title=title,
             channel_name=channel_name,
             watched_at=watched_at,
             source="takeout",
-        )
-        db.add(record)
+        ))
+        new_video_ids.append(video_id)
         inserted += 1
 
     db.commit()
-    return {"inserted": inserted, "total_entries": len(data)}
+
+    if new_video_ids and settings.google_api_key:
+        from backend.collectors.youtube_enricher import enrich_and_update
+        enriched = enrich_and_update(list(set(new_video_ids)), user_id=1, db=db, api_key=settings.google_api_key)
+    else:
+        enriched = 0
+
+    return {"inserted": inserted, "enriched": enriched, "total_entries": len(data)}

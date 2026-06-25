@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     # Notion
     notion_token: str = ""
 
+    # Google API Key (YouTube Data API v3 — OAuth 불필요, 공개 영상 메타데이터용)
+    google_api_key: str = ""
+
     # AI
     anthropic_api_key: str = ""
     openai_api_key: str = ""
