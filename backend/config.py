@@ -22,8 +22,10 @@ class Settings(BaseSettings):
     google_client_secret: str = ""
     google_redirect_uri: str = "http://localhost:8000/auth/google/callback"
 
-    # Notion
-    notion_token: str = ""
+    # Notion OAuth
+    notion_client_id: str = ""
+    notion_client_secret: str = ""
+    notion_redirect_uri: str = "http://localhost:8000/auth/notion/callback"
 
     # Google API Key (YouTube Data API v3 — OAuth 불필요, 공개 영상 메타데이터용)
     google_api_key: str = ""

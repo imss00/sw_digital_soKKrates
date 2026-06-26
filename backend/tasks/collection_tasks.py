@@ -6,18 +6,15 @@ from backend.database import SessionLocal
 
 @celery_app.task(name="backend.tasks.collection_tasks.collect_daily")
 def collect_daily():
-    """자정 30분: Calendar + Notion 수집"""
+    """자정 30분: Calendar 수집 (Notion은 OAuth 심사 대기 중, 추후 추가)"""
     db = SessionLocal()
     try:
         from backend.collectors.calendar_collector import collect_calendar
-        from backend.collectors.notion_collector import collect_notion
 
         cal_result = collect_calendar(user_id=1, db=db)
-        notion_result = collect_notion(user_id=1, db=db)
 
         return {
             "calendar": cal_result,
-            "notion": notion_result,
         }
     finally:
         db.close()

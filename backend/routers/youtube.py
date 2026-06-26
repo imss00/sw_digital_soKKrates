@@ -18,7 +18,7 @@ def extract_video_id(url: str) -> str | None:
 
 
 @router.post("/takeout")
-async def upload_takeout(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def upload_takeout(file: UploadFile = File(...), user_id: int = 3, db: Session = Depends(get_db)):
     """Google Takeout watch-history.json 업로드 + 파싱"""
     content = await file.read()
     data = json.loads(content)
@@ -49,14 +49,14 @@ async def upload_takeout(file: UploadFile = File(...), db: Session = Depends(get
 
         existing = (
             db.query(YouTubeHistory)
-            .filter_by(user_id=1, video_id=video_id, watched_at=watched_at)
+            .filter_by(user_id=user_id, video_id=video_id, watched_at=watched_at)
             .first()
         )
         if existing:
             continue
 
         db.add(YouTubeHistory(
-            user_id=1,
+            user_id=user_id,
             video_id=video_id,
             title=title,
             channel_name=channel_name,
@@ -70,7 +70,7 @@ async def upload_takeout(file: UploadFile = File(...), db: Session = Depends(get
 
     if new_video_ids and settings.google_api_key:
         from backend.collectors.youtube_enricher import enrich_and_update
-        enriched = enrich_and_update(list(set(new_video_ids)), user_id=1, db=db, api_key=settings.google_api_key)
+        enriched = enrich_and_update(list(set(new_video_ids)), user_id=user_id, db=db, api_key=settings.google_api_key)
     else:
         enriched = 0
 

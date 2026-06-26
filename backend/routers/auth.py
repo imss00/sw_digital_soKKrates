@@ -1,6 +1,10 @@
+import base64
+import hashlib
+import os
 from datetime import datetime, timedelta, timezone
 
 import httpx
+import redis as redis_lib
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -9,6 +13,10 @@ from backend.database import get_db
 from backend.models.user import User
 
 router = APIRouter()
+
+
+def _get_redis():
+    return redis_lib.from_url(settings.redis_url, decode_responses=True)
 
 
 def _find_or_create_user(db: Session, email: str, name: str) -> User:
@@ -23,18 +31,36 @@ def _find_or_create_user(db: Session, email: str, name: str) -> User:
 @router.get("/spotify")
 def spotify_login():
     import urllib.parse
+
+    code_verifier = base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("=")
+    code_challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(code_verifier.encode()).digest()
+    ).decode().rstrip("=")
+    state = base64.urlsafe_b64encode(os.urandom(16)).decode().rstrip("=")
+
+    _get_redis().setex(f"spotify_pkce:{state}", 600, code_verifier)
+
     params = {
         "client_id": settings.spotify_client_id,
         "response_type": "code",
         "redirect_uri": settings.spotify_redirect_uri,
         "scope": "user-read-recently-played user-top-read user-read-email",
+        "code_challenge_method": "S256",
+        "code_challenge": code_challenge,
+        "state": state,
     }
     url = "https://accounts.spotify.com/authorize?" + urllib.parse.urlencode(params)
     return {"auth_url": url}
 
 
 @router.get("/spotify/callback")
-def spotify_callback(code: str, db: Session = Depends(get_db)):
+def spotify_callback(code: str, state: str = "", db: Session = Depends(get_db)):
+    r = _get_redis()
+    code_verifier = r.get(f"spotify_pkce:{state}")
+    if not code_verifier:
+        raise HTTPException(status_code=400, detail="Invalid or expired state — restart OAuth flow")
+    r.delete(f"spotify_pkce:{state}")
+
     resp = httpx.post(
         "https://accounts.spotify.com/api/token",
         data={
@@ -42,11 +68,11 @@ def spotify_callback(code: str, db: Session = Depends(get_db)):
             "code": code,
             "redirect_uri": settings.spotify_redirect_uri,
             "client_id": settings.spotify_client_id,
-            "client_secret": settings.spotify_client_secret,
+            "code_verifier": code_verifier,
         },
     )
     if resp.status_code != 200:
-        raise HTTPException(status_code=400, detail="Spotify token exchange failed")
+        raise HTTPException(status_code=400, detail=f"Spotify token exchange failed: {resp.text}")
     tokens = resp.json()
 
     me_resp = httpx.get(
@@ -54,7 +80,7 @@ def spotify_callback(code: str, db: Session = Depends(get_db)):
         headers={"Authorization": f"Bearer {tokens['access_token']}"},
     )
     if me_resp.status_code != 200:
-        raise HTTPException(status_code=400, detail="Failed to fetch Spotify user info")
+        raise HTTPException(status_code=400, detail=f"Failed to fetch Spotify user info: {me_resp.status_code} {me_resp.text}")
     me = me_resp.json()
 
     email = me.get("email") or f"spotify_{me['id']}@paperback.local"
@@ -127,3 +153,52 @@ def google_callback(code: str, db: Session = Depends(get_db)):
     db.commit()
 
     return {"message": "Google 연동 완료", "user_id": user.id, "email": email}
+
+
+@router.get("/notion")
+def notion_login():
+    import urllib.parse
+    params = {
+        "client_id": settings.notion_client_id,
+        "redirect_uri": settings.notion_redirect_uri,
+        "response_type": "code",
+        "owner": "user",
+    }
+    url = "https://api.notion.com/v1/oauth/authorize?" + urllib.parse.urlencode(params)
+    return {"auth_url": url}
+
+
+@router.get("/notion/callback")
+def notion_callback(code: str, db: Session = Depends(get_db)):
+    import base64
+    credentials = base64.b64encode(
+        f"{settings.notion_client_id}:{settings.notion_client_secret}".encode()
+    ).decode()
+
+    resp = httpx.post(
+        "https://api.notion.com/v1/oauth/token",
+        headers={
+            "Authorization": f"Basic {credentials}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": settings.notion_redirect_uri,
+        },
+    )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=400, detail=f"Notion token exchange failed: {resp.text}")
+    tokens = resp.json()
+
+    owner = tokens.get("owner", {})
+    user_info = owner.get("user", {})
+    person = user_info.get("person", {})
+    email = person.get("email") or f"notion_{tokens.get('bot_id', 'unknown')}@paperback.local"
+    name = user_info.get("name") or email
+
+    user = _find_or_create_user(db, email, name)
+    user.notion_token = tokens["access_token"]
+    db.commit()
+
+    return {"message": "Notion 연동 완료", "user_id": user.id, "email": email}

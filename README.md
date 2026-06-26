@@ -75,8 +75,14 @@ Spotify API는 최근 50곡까지만 한 번에 가져올 수 있습니다. 4시
 ### Notion
 최근 24시간 내 수정된 페이지를 수집합니다. 페이지 제목뿐 아니라 블록 내용까지 텍스트로 추출합니다. Notion API rate limit(3 req/sec)이 있어서 요청마다 0.35초 대기합니다.
 
-### 사진 EXIF
-직접 업로드 방식입니다. `Pillow`로 GPS 좌표, 촬영 시각, 카메라 모델을 파싱합니다. Phase 2에서 Google Vision API + Claude로 사진 속 장면을 서사로 변환할 예정입니다.
+> **현재 상태**: Notion Public Integration OAuth는 Notion 측 심사/승인이 필요합니다. 심사 승인 후 `/auth/notion` OAuth 플로우로 연동 가능하며, 코드는 이미 구현되어 있습니다. 현재 버전에서는 Notion 수집이 비활성화되어 있습니다.
+
+### 사진 EXIF + 스크린샷 OCR
+직접 업로드 방식입니다. `Pillow`로 GPS 좌표, 촬영 시각, 카메라 모델을 파싱합니다.
+
+PNG이거나 EXIF가 없는 파일은 스크린샷으로 판단하여 Google Vision API `TEXT_DETECTION`으로 텍스트를 추출합니다. 추출된 텍스트는 `unified_documents`에 `content_type="screenshot"`으로 저장되어 Phase 2 관심사 분석 대상이 됩니다.
+
+> **사진 자동 sync (미구현)**: 현재는 API에 직접 업로드하는 방식입니다. React Native 앱 개발 시점에 갤러리/스크린샷 폴더 백그라운드 자동 sync를 구현할 예정입니다.
 
 ---
 

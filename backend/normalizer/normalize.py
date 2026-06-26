@@ -111,6 +111,17 @@ def normalize_notion(record: NotionPage) -> dict | None:
 
 
 def normalize_photo(record: Photo) -> dict | None:
+    import json as _json
+
+    # 스크린샷 OCR 텍스트가 있으면 이미 upload 시점에 unified_documents에 직접 삽입됨
+    if record.vision_labels:
+        try:
+            labels = _json.loads(record.vision_labels)
+            if labels.get("ocr_text"):
+                return None  # 중복 삽입 방지
+        except Exception:
+            pass
+
     parts = [f"사진 촬영: {record.taken_at}"]
     if record.latitude and record.longitude:
         parts.append(f"위치: ({record.latitude:.4f}, {record.longitude:.4f})")

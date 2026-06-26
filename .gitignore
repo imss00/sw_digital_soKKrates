@@ -1,0 +1,12 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+uploads/photos/*
+uploads/takeout/*
+!uploads/photos/.gitkeep
+!uploads/takeout/.gitkeep
+*.egg-info/
+dist/
+build/
