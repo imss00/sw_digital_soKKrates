@@ -5,7 +5,7 @@
 document.addEventListener("DOMContentLoaded", async () => {
   // 설정 불러오기
   const config = await chrome.storage.sync.get(["apiUrl", "authToken", "userId"]);
-  document.getElementById("apiUrl").value = config.apiUrl || "http://localhost:8000";
+  document.getElementById("apiUrl").value = config.apiUrl || "https://swdigitalsokkrates-production.up.railway.app";
   document.getElementById("userId").value = config.userId || "";
   document.getElementById("authToken").value = config.authToken || "";
 
@@ -19,7 +19,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("pendingCount").textContent = `${pending}건`;
 
   // 서버 연결 상태 확인
-  const apiUrl = config.apiUrl || "http://localhost:8000";
+  const apiUrl = config.apiUrl || "https://swdigitalsokkrates-production.up.railway.app";
   try {
     const resp = await fetch(`${apiUrl}/health`, { method: "GET" });
     if (resp.ok) {

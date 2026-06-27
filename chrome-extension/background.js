@@ -3,7 +3,7 @@
 // 브라우징 히스토리 수집 + 배치 전송 + 체류 시간 추적
 // ============================================================
 
-const DEFAULT_API_URL = "http://localhost:8000";
+const DEFAULT_API_URL = "https://swdigitalsokkrates-production.up.railway.app";
 const COLLECT_INTERVAL_MINUTES = 60;
 
 // 수집 제외 도메인
