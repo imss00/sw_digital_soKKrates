@@ -3,7 +3,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, UploadFile, File
+from fastapi import APIRouter, Depends, UploadFile, File, Query
 from PIL import Image
 from sqlalchemy.orm import Session
 
@@ -21,10 +21,10 @@ UPLOAD_DIR = "uploads/photos"
 @router.post("/upload")
 async def upload_photos(
     files: list[UploadFile] = File(...),
-    user_id: int = 3,
+    user_id: int = Query(..., description="업로드할 유저 ID"),
     db: Session = Depends(get_db),
 ):
-    """사진 업로드 + EXIF 파싱. 스크린샷은 Vision API OCR로 텍스트 추출."""
+    """사진 업로드 + EXIF 파싱. 스크린샷(EXIF 없는 PNG)은 Vision API OCR로 텍스트 추출."""
     today = datetime.now().strftime("%Y-%m-%d")
     save_dir = os.path.join(UPLOAD_DIR, str(user_id), today)
     os.makedirs(save_dir, exist_ok=True)
@@ -49,10 +49,14 @@ async def upload_photos(
         except Exception:
             pass
 
+        # Vision API OCR — 네트워크 오류 시 graceful fallback
         ocr_text = None
         screenshot = is_screenshot(filepath, exif_data)
         if screenshot and settings.google_api_key:
-            ocr_text = extract_text_vision(filepath, settings.google_api_key)
+            try:
+                ocr_text = await extract_text_vision(content, settings.google_api_key)
+            except Exception:
+                ocr_text = None
 
         now = datetime.now(timezone.utc)
         photo = Photo(

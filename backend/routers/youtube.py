@@ -2,7 +2,7 @@ import json
 import re
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, UploadFile, File
+from fastapi import APIRouter, Depends, UploadFile, File, Query
 from sqlalchemy.orm import Session
 
 from backend.config import settings
@@ -18,10 +18,22 @@ def extract_video_id(url: str) -> str | None:
 
 
 @router.post("/takeout")
-async def upload_takeout(file: UploadFile = File(...), user_id: int = 3, db: Session = Depends(get_db)):
+async def upload_takeout(
+    file: UploadFile = File(...),
+    user_id: int = Query(..., description="업로드할 유저 ID"),
+    db: Session = Depends(get_db),
+):
     """Google Takeout watch-history.json 업로드 + 파싱"""
     content = await file.read()
     data = json.loads(content)
+
+    # 루프 전 기존 (video_id, watched_at) 세트를 한 번에 조회 — N+1 방지
+    existing_keys = {
+        (row.video_id, row.watched_at)
+        for row in db.query(YouTubeHistory.video_id, YouTubeHistory.watched_at)
+        .filter(YouTubeHistory.user_id == user_id)
+        .all()
+    }
 
     inserted = 0
     new_video_ids = []
@@ -42,18 +54,13 @@ async def upload_takeout(file: UploadFile = File(...), user_id: int = 3, db: Ses
         except ValueError:
             continue
 
+        if (video_id, watched_at) in existing_keys:
+            continue
+
         channel_name = None
         subtitles = entry.get("subtitles", [])
         if subtitles:
             channel_name = subtitles[0].get("name")
-
-        existing = (
-            db.query(YouTubeHistory)
-            .filter_by(user_id=user_id, video_id=video_id, watched_at=watched_at)
-            .first()
-        )
-        if existing:
-            continue
 
         db.add(YouTubeHistory(
             user_id=user_id,

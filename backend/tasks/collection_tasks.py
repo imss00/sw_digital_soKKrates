@@ -6,43 +6,57 @@ from backend.database import SessionLocal
 
 @celery_app.task(name="backend.tasks.collection_tasks.collect_daily")
 def collect_daily():
-    """자정 30분: Calendar 수집 (Notion은 OAuth 심사 대기 중, 추후 추가)"""
+    """자정 30분: Google Calendar 수집 (Google token 있는 모든 유저)"""
     db = SessionLocal()
     try:
         from backend.collectors.calendar_collector import collect_calendar
+        from backend.models.user import User
 
-        cal_result = collect_calendar(user_id=1, db=db)
-
-        return {
-            "calendar": cal_result,
-        }
+        users = db.query(User).filter(User.google_refresh_token.isnot(None)).all()
+        results = {}
+        for user in users:
+            results[user.id] = collect_calendar(user_id=user.id, db=db)
+        return results
     finally:
         db.close()
 
 
 @celery_app.task(name="backend.tasks.collection_tasks.collect_spotify_task")
 def collect_spotify_task():
-    """4시간마다: Spotify 폴링"""
+    """4시간마다: Spotify 폴링 (Spotify token 있는 모든 유저)"""
     db = SessionLocal()
     try:
         from backend.collectors.spotify_collector import collect_spotify
-        return collect_spotify(user_id=1, db=db)
+        from backend.models.user import User
+
+        users = db.query(User).filter(User.spotify_refresh_token.isnot(None)).all()
+        results = {}
+        for user in users:
+            results[user.id] = collect_spotify(user_id=user.id, db=db)
+        return results
     finally:
         db.close()
 
 
 @celery_app.task(name="backend.tasks.collection_tasks.normalize_and_trigger")
 def normalize_and_trigger():
-    """새벽 1시: 정규화 + Phase 2 트리거"""
+    """새벽 1시: 정규화 + Phase 2 트리거 (모든 유저)"""
     db = SessionLocal()
     try:
         from backend.normalizer.normalize import normalize_daily
-        result = normalize_daily(user_id=1, target_date=date.today() - timedelta(days=1), db=db)
+        from backend.models.user import User
+
+        target_date = date.today() - timedelta(days=1)
+        users = db.query(User).all()
+        results = {}
+        for user in users:
+            results[user.id] = normalize_daily(user_id=user.id, target_date=target_date, db=db)
 
         # TODO: Phase 2 분석 파이프라인 호출
         # from backend.tasks.analysis_tasks import run_analysis
-        # run_analysis.delay(user_id=1, target_date=str(date.today()))
+        # for uid in results:
+        #     run_analysis.delay(user_id=uid, target_date=str(target_date))
 
-        return result
+        return results
     finally:
         db.close()

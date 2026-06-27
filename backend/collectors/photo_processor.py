@@ -1,9 +1,11 @@
 import base64
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 import httpx
 from PIL import Image
 from PIL.ExifTags import TAGS, GPSTAGS
+
+KST = timezone(timedelta(hours=9))
 
 
 def _convert_gps_to_decimal(gps_coords, gps_ref) -> float | None:
@@ -20,10 +22,9 @@ def _convert_gps_to_decimal(gps_coords, gps_ref) -> float | None:
         return None
 
 
-def extract_text_vision(file_path: str, api_key: str) -> str | None:
+async def extract_text_vision(image_bytes: bytes, api_key: str) -> str | None:
     """Google Vision API TEXT_DETECTION으로 이미지에서 텍스트 추출"""
-    with open(file_path, "rb") as f:
-        image_b64 = base64.b64encode(f.read()).decode()
+    image_b64 = base64.b64encode(image_bytes).decode()
 
     payload = {
         "requests": [{
@@ -32,11 +33,12 @@ def extract_text_vision(file_path: str, api_key: str) -> str | None:
         }]
     }
 
-    resp = httpx.post(
-        f"https://vision.googleapis.com/v1/images:annotate?key={api_key}",
-        json=payload,
-        timeout=30,
-    )
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            f"https://vision.googleapis.com/v1/images:annotate?key={api_key}",
+            json=payload,
+        )
+
     if resp.status_code != 200:
         return None
 
@@ -49,9 +51,9 @@ def extract_text_vision(file_path: str, api_key: str) -> str | None:
 
 
 def is_screenshot(file_path: str, exif_data: dict) -> bool:
-    """EXIF가 없는 PNG면 스크린샷으로 판단"""
-    if file_path.lower().endswith(".png"):
-        return True
+    """EXIF(촬영시각+위치) 없는 PNG면 스크린샷으로 판단. EXIF 있는 PNG 사진은 제외."""
+    if not file_path.lower().endswith(".png"):
+        return False
     return not exif_data.get("taken_at") and not exif_data.get("latitude")
 
 
@@ -79,7 +81,10 @@ def extract_exif(file_path: str) -> dict:
 
     if "DateTimeOriginal" in exif:
         try:
-            result["taken_at"] = datetime.strptime(exif["DateTimeOriginal"], "%Y:%m:%d %H:%M:%S")
+            # EXIF 시각은 로컬 시간(KST)으로 저장됨 — timezone-aware로 변환
+            result["taken_at"] = datetime.strptime(
+                exif["DateTimeOriginal"], "%Y:%m:%d %H:%M:%S"
+            ).replace(tzinfo=KST)
         except ValueError:
             pass
 

@@ -1,7 +1,7 @@
 import re
 from datetime import datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -25,16 +25,17 @@ class BrowsingRecord(BaseModel):
 
 
 class BrowsingBatch(BaseModel):
+    user_id: int  # Chrome Extension이 body에 포함해서 전송
     records: list[BrowsingRecord]
 
 
 @router.post("/batch")
-def receive_browsing_batch(batch: BrowsingBatch, user_id: int = 3, db: Session = Depends(get_db)):
+def receive_browsing_batch(batch: BrowsingBatch, db: Session = Depends(get_db)):
     """Chrome Extension에서 배치로 전송받는 엔드포인트"""
     inserted = 0
     for record in batch.records:
         entry = BrowsingHistory(
-            user_id=user_id,
+            user_id=batch.user_id,
             url=record.url,
             domain=record.domain,
             title=record.title,
@@ -52,10 +53,19 @@ def receive_browsing_batch(batch: BrowsingBatch, user_id: int = 3, db: Session =
 
 
 @router.post("/youtube-detect")
-def receive_youtube_detect(batch: BrowsingBatch, user_id: int = 3, db: Session = Depends(get_db)):
+def receive_youtube_detect(batch: BrowsingBatch, db: Session = Depends(get_db)):
     """Chrome Extension에서 감지한 YouTube 시청 기록 수신"""
+    user_id = batch.user_id
     inserted = 0
     new_video_ids = []
+
+    # 루프 전 기존 (video_id, watched_at) 세트를 한 번에 조회 — N+1 방지
+    existing_keys = {
+        (row.video_id, row.watched_at)
+        for row in db.query(YouTubeHistory.video_id, YouTubeHistory.watched_at)
+        .filter(YouTubeHistory.user_id == user_id)
+        .all()
+    }
 
     for record in batch.records:
         match = re.search(r"v=([a-zA-Z0-9_-]{11})", record.url)
@@ -63,12 +73,7 @@ def receive_youtube_detect(batch: BrowsingBatch, user_id: int = 3, db: Session =
             continue
 
         video_id = match.group(1)
-        existing = (
-            db.query(YouTubeHistory)
-            .filter_by(user_id=user_id, video_id=video_id, watched_at=record.visited_at)
-            .first()
-        )
-        if existing:
+        if (video_id, record.visited_at) in existing_keys:
             continue
 
         db.add(YouTubeHistory(
