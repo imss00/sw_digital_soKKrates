@@ -52,10 +52,9 @@ def normalize_and_trigger():
         for user in users:
             results[user.id] = normalize_daily(user_id=user.id, target_date=target_date, db=db)
 
-        # TODO: Phase 2 분석 파이프라인 호출
-        # from backend.tasks.analysis_tasks import run_analysis
-        # for uid in results:
-        #     run_analysis.delay(user_id=uid, target_date=str(target_date))
+        from backend.tasks.analysis_tasks import run_phase2
+        for uid in results:
+            run_phase2.delay(user_id=uid, target_date_str=str(target_date))
 
         return results
     finally:

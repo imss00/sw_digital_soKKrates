@@ -132,6 +132,55 @@ Chrome과 YouTube는 Extension이 실시간으로 서버에 push합니다.
 
 ---
 
+## Phase 2-3 개발 가이드 (팀원용)
+
+뼈대 코드가 `backend/analysis/`에 준비되어 있습니다. 함수 시그니처와 DB 연결은 완성되어 있고, 로직이 필요한 곳에 `TODO` 주석이 달려 있습니다. 그 위에 덮어쓰면 됩니다.
+
+### 파일 구조
+
+```
+backend/analysis/
+  embedder.py        ← 역할 A: OpenAI 임베딩 생성 + DB 저장
+  clusterer.py       ← 역할 A: DBSCAN 클러스터링 + cluster_id 저장
+  recommender.py     ← 역할 A: RSS 수집 + FAISS 유사도 검색 + Spotify 무드
+  journal_composer.py← 역할 B: Claude 키워드/회고/포커스/기사소개/저널 편집
+
+backend/tasks/
+  analysis_tasks.py  ← Phase 2-3 Celery 태스크 (자정 정규화 완료 후 자동 실행)
+```
+
+### 실행 흐름
+
+```
+(자정) collection_tasks.normalize_and_trigger()
+    → analysis_tasks.run_phase2(user_id, date)
+        → embedder.embed_and_store()       # OpenAI 임베딩 → embedding_json 저장
+        → clusterer.run_clustering()       # DBSCAN → cluster_id 저장
+        → recommender.run_recommendation() # RSS + FAISS + Spotify 무드
+        → journal_composer.run_journal_composition()  # Claude → 저널 텍스트
+```
+
+### 수동 테스트 방법
+
+Swagger(`/docs`)에서 직접 호출하거나:
+
+```bash
+# 임베딩 + 클러스터링 + 저널 전체 파이프라인 수동 실행
+POST /webhook/normalize?user_id=1   # 정규화 (Phase 1 → unified_documents)
+
+# 그 다음 Python에서 직접:
+from backend.tasks.analysis_tasks import run_phase2
+run_phase2(user_id=1, target_date_str="2026-06-27")
+```
+
+### FAISS 주의사항
+
+Railway 배포 환경에서는 파일로 FAISS 인덱스를 저장하면 재배포 시 사라집니다.
+`recommender.py`는 **인메모리** 방식으로 설계되어 있습니다 (호출마다 당일 벡터로 재구성).
+주간 누적이 필요하면 벡터를 DB에 쌓고 부팅 시 로드하는 방식으로 확장하세요.
+
+---
+
 ## 로컬 실행 방법 (개발용)
 
 ### 1. 환경변수 설정
