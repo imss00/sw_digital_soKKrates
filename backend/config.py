@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     openai_api_key: str = ""
 
+    # Webhook secret (설정 시 X-Webhook-Secret 헤더 검증, 미설정 시 로컬 개발용 무인증)
+    webhook_secret: str = ""
+
     # App
     app_host: str = "0.0.0.0"
     app_port: int = 8000

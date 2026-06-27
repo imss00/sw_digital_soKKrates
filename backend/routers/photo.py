@@ -1,6 +1,5 @@
+import io
 import json
-import os
-import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, UploadFile, File, Query
@@ -15,8 +14,6 @@ from backend.collectors.photo_processor import extract_exif, extract_text_vision
 
 router = APIRouter()
 
-UPLOAD_DIR = "uploads/photos"
-
 
 @router.post("/upload")
 async def upload_photos(
@@ -24,34 +21,23 @@ async def upload_photos(
     user_id: int = Query(..., description="업로드할 유저 ID"),
     db: Session = Depends(get_db),
 ):
-    """사진 업로드 + EXIF 파싱. 스크린샷(EXIF 없는 PNG)은 Vision API OCR로 텍스트 추출."""
-    today = datetime.now().strftime("%Y-%m-%d")
-    save_dir = os.path.join(UPLOAD_DIR, str(user_id), today)
-    os.makedirs(save_dir, exist_ok=True)
-
+    """사진 업로드 + EXIF 파싱. 파일은 디스크에 저장하지 않고 메모리에서 처리."""
     results = []
     for file in files:
         original_name = file.filename or "unknown.jpg"
-        ext = os.path.splitext(original_name)[1]
-        filename = f"{uuid.uuid4()}{ext}"
-        filepath = os.path.join(save_dir, filename)
-
         content = await file.read()
-        with open(filepath, "wb") as f:
-            f.write(content)
 
-        exif_data = extract_exif(filepath)
+        exif_data = extract_exif(content)
 
         width, height = None, None
         try:
-            img = Image.open(filepath)
+            img = Image.open(io.BytesIO(content))
             width, height = img.size
         except Exception:
             pass
 
-        # Vision API OCR — 네트워크 오류 시 graceful fallback
         ocr_text = None
-        screenshot = is_screenshot(filepath, exif_data)
+        screenshot = is_screenshot(original_name, exif_data)
         if screenshot and settings.google_api_key:
             try:
                 ocr_text = await extract_text_vision(content, settings.google_api_key)
@@ -61,7 +47,7 @@ async def upload_photos(
         now = datetime.now(timezone.utc)
         photo = Photo(
             user_id=user_id,
-            file_path=filepath,
+            file_path=None,
             original_filename=original_name,
             taken_at=exif_data.get("taken_at") or now,
             latitude=exif_data.get("latitude"),
@@ -88,7 +74,7 @@ async def upload_photos(
             db.add(doc)
 
         results.append({
-            "filename": filename,
+            "filename": original_name,
             "exif": exif_data,
             "screenshot": screenshot,
             "ocr_text": ocr_text,

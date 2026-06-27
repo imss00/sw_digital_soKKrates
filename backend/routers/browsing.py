@@ -32,9 +32,22 @@ class BrowsingBatch(BaseModel):
 @router.post("/batch")
 def receive_browsing_batch(batch: BrowsingBatch, db: Session = Depends(get_db)):
     """Chrome Extension에서 배치로 전송받는 엔드포인트"""
+    urls_in_batch = [r.url for r in batch.records]
+    existing_keys = {
+        (row.url, row.visited_at)
+        for row in db.query(BrowsingHistory.url, BrowsingHistory.visited_at)
+        .filter(
+            BrowsingHistory.user_id == batch.user_id,
+            BrowsingHistory.url.in_(urls_in_batch),
+        )
+        .all()
+    }
+
     inserted = 0
     for record in batch.records:
-        entry = BrowsingHistory(
+        if (record.url, record.visited_at) in existing_keys:
+            continue
+        db.add(BrowsingHistory(
             user_id=batch.user_id,
             url=record.url,
             domain=record.domain,
@@ -44,8 +57,7 @@ def receive_browsing_batch(batch: BrowsingBatch, db: Session = Depends(get_db)):
             visited_at=record.visited_at,
             time_spent_sec=record.time_spent_sec,
             visit_count=record.visit_count,
-        )
-        db.add(entry)
+        ))
         inserted += 1
 
     db.commit()

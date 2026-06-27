@@ -50,15 +50,17 @@ async def extract_text_vision(image_bytes: bytes, api_key: str) -> str | None:
     return text.strip() or None
 
 
-def is_screenshot(file_path: str, exif_data: dict) -> bool:
+def is_screenshot(filename: str, exif_data: dict) -> bool:
     """EXIF(촬영시각+위치) 없는 PNG면 스크린샷으로 판단. EXIF 있는 PNG 사진은 제외."""
-    if not file_path.lower().endswith(".png"):
+    if not filename.lower().endswith(".png"):
         return False
     return not exif_data.get("taken_at") and not exif_data.get("latitude")
 
 
-def extract_exif(file_path: str) -> dict:
-    """사진 파일에서 EXIF 메타데이터 추출"""
+def extract_exif(image_bytes: bytes) -> dict:
+    """사진 바이트에서 EXIF 메타데이터 추출 (디스크 저장 불필요)"""
+    import io
+
     result = {
         "taken_at": None,
         "latitude": None,
@@ -67,7 +69,7 @@ def extract_exif(file_path: str) -> dict:
     }
 
     try:
-        img = Image.open(file_path)
+        img = Image.open(io.BytesIO(image_bytes))
         exif_data = img._getexif()
         if not exif_data:
             return result
