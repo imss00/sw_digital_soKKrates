@@ -213,7 +213,26 @@ uvicorn backend.main:app --reload
 
 ### 4. Google OAuth 연동
 1. `GET /auth/google` → 반환된 URL 브라우저에서 열기 → Google 로그인
-2. Chrome Extension: `chrome://extensions` → 개발자 모드 → `chrome-extension/` 폴더 로드
+
+### 5. Chrome Extension 설치
+
+1. Chrome 주소창에 `chrome://extensions` 입력
+2. 오른쪽 상단 **개발자 모드** 토글 켜기
+3. **압축 해제된 확장 프로그램 로드** 클릭
+4. 이 저장소의 `chrome-extension/` 폴더 선택
+5. 브라우저 우측 상단에 PaperBack 아이콘이 생김
+
+**로그인 방법**
+
+1. PaperBack 아이콘 클릭 → 팝업 열기
+2. **"Google로 로그인"** 버튼 클릭
+3. 구글 계정 선택 → 권한 허용
+4. "로그인 완료" 탭이 자동으로 닫히면 완료
+
+로그인 후에는 별도 설정 없이 자동으로 작동합니다.
+- 1시간마다 브라우징 기록 + 기사 본문 수집
+- YouTube 시청 기록 실시간 감지
+- 팝업의 **"지금 전송하기"** 버튼으로 즉시 전송 가능
 
 ---
 
