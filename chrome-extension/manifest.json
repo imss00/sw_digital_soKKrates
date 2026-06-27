@@ -23,6 +23,11 @@
       "matches": ["<all_urls>"],
       "js": ["lib/Readability.js", "content.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://swdigitalsokkrates-production.up.railway.app/auth/extension-done*"],
+      "js": ["auth-callback.js"],
+      "run_at": "document_idle"
     }
   ],
   "action": {

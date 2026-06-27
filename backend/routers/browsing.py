@@ -9,6 +9,7 @@ from backend.config import settings
 from backend.database import get_db
 from backend.models.browsing_history import BrowsingHistory
 from backend.models.youtube_history import YouTubeHistory
+from backend.routers.auth import decode_jwt
 
 router = APIRouter()
 
@@ -25,19 +26,31 @@ class BrowsingRecord(BaseModel):
 
 
 class BrowsingBatch(BaseModel):
-    user_id: int  # Chrome Extension이 body에 포함해서 전송
+    user_id: int | None = None  # Deprecated: Authorization 헤더 사용 권장
     records: list[BrowsingRecord]
 
 
+def _resolve_user_id(authorization: str | None, body_user_id: int | None) -> int:
+    if authorization and authorization.startswith("Bearer "):
+        return decode_jwt(authorization.removeprefix("Bearer "))
+    if body_user_id is not None:
+        return body_user_id
+    raise HTTPException(status_code=401, detail="인증 필요: Authorization 헤더 또는 user_id 필요")
+
+
 @router.post("/batch")
-def receive_browsing_batch(batch: BrowsingBatch, db: Session = Depends(get_db)):
-    """Chrome Extension에서 배치로 전송받는 엔드포인트"""
+def receive_browsing_batch(
+    batch: BrowsingBatch,
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    user_id = _resolve_user_id(authorization, batch.user_id)
     urls_in_batch = [r.url for r in batch.records]
     existing_keys = {
         (row.url, row.visited_at)
         for row in db.query(BrowsingHistory.url, BrowsingHistory.visited_at)
         .filter(
-            BrowsingHistory.user_id == batch.user_id,
+            BrowsingHistory.user_id == user_id,
             BrowsingHistory.url.in_(urls_in_batch),
         )
         .all()
@@ -48,7 +61,7 @@ def receive_browsing_batch(batch: BrowsingBatch, db: Session = Depends(get_db)):
         if (record.url, record.visited_at) in existing_keys:
             continue
         db.add(BrowsingHistory(
-            user_id=batch.user_id,
+            user_id=user_id,
             url=record.url,
             domain=record.domain,
             title=record.title,
@@ -65,9 +78,12 @@ def receive_browsing_batch(batch: BrowsingBatch, db: Session = Depends(get_db)):
 
 
 @router.post("/youtube-detect")
-def receive_youtube_detect(batch: BrowsingBatch, db: Session = Depends(get_db)):
-    """Chrome Extension에서 감지한 YouTube 시청 기록 수신"""
-    user_id = batch.user_id
+def receive_youtube_detect(
+    batch: BrowsingBatch,
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    user_id = _resolve_user_id(authorization, batch.user_id)
     inserted = 0
     new_video_ids = []
 

@@ -123,26 +123,21 @@ async function collectHistory() {
 
 // ---- 배치 전송 ----
 async function sendBatch() {
-  const config = await chrome.storage.sync.get(["apiUrl", "authToken", "userId"]);
-  const apiUrl = config.apiUrl || DEFAULT_API_URL;
-  const authToken = config.authToken || "";
-  const userId = config.userId ? parseInt(config.userId, 10) : null;
+  const { apiUrl: storedApiUrl, jwt } = await chrome.storage.local.get(["apiUrl", "jwt"]);
+  const apiUrl = storedApiUrl || DEFAULT_API_URL;
 
-  if (!userId) {
-    console.warn("[PaperBack] userId not configured — skipping send. Set it in the popup.");
+  if (!jwt) {
+    console.warn("[PaperBack] 로그인 필요 — 팝업에서 Google로 로그인해주세요.");
     return;
   }
 
-  const data = await chrome.storage.local.get([
-    "pendingRecords",
-    "youtubeRecords",
-  ]);
+  const data = await chrome.storage.local.get(["pendingRecords", "youtubeRecords"]);
   const pendingRecords = data.pendingRecords || [];
   const youtubeRecords = data.youtubeRecords || [];
 
   const headers = {
     "Content-Type": "application/json",
-    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+    "Authorization": `Bearer ${jwt}`,
   };
 
   // 브라우징 기록 전송
@@ -151,7 +146,7 @@ async function sendBatch() {
       const response = await fetch(`${apiUrl}/browsing/batch`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ user_id: userId, records: pendingRecords }),
+        body: JSON.stringify({ records: pendingRecords }),
       });
 
       if (response.ok) {
@@ -162,6 +157,9 @@ async function sendBatch() {
         const stats = (await chrome.storage.local.get("stats")).stats || {};
         stats.todaySent = (stats.todaySent || 0) + result.inserted;
         await chrome.storage.local.set({ stats });
+      } else if (response.status === 401) {
+        console.warn("[PaperBack] 토큰 만료 — 다시 로그인 필요");
+        await chrome.storage.local.remove("jwt");
       } else {
         console.error(`[PaperBack] Send failed: ${response.status}`);
       }
@@ -176,7 +174,7 @@ async function sendBatch() {
       const response = await fetch(`${apiUrl}/browsing/youtube-detect`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ user_id: userId, records: youtubeRecords }),
+        body: JSON.stringify({ records: youtubeRecords }),
       });
 
       if (response.ok) {
@@ -239,7 +237,7 @@ async function saveTabTime() {
   await chrome.storage.local.set({ tabStartTimes: tabTimes });
 }
 
-// ---- Content Script에서 기사 본문 수신 ----
+// ---- Content Script / auth-callback에서 메시지 수신 ----
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "ARTICLE_EXTRACTED") {
     chrome.storage.local.get("articleBuffer", (data) => {
@@ -249,6 +247,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
     sendResponse({ status: "ok" });
   }
+
+  if (message.type === "JWT_RECEIVED") {
+    chrome.storage.local.set({ jwt: message.token }, () => {
+      console.log("[PaperBack] JWT 저장 완료 — 로그인 성공");
+    });
+    sendResponse({ status: "ok" });
+  }
+
   return true;
 });
 

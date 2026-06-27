@@ -4,8 +4,10 @@ import os
 from datetime import datetime, timedelta, timezone
 
 import httpx
+import jwt as pyjwt
 import redis as redis_lib
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from backend.config import settings
@@ -13,6 +15,28 @@ from backend.database import get_db
 from backend.models.user import User
 
 router = APIRouter()
+
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRE_DAYS = 30
+
+
+def _issue_jwt(user_id: int) -> str:
+    payload = {
+        "sub": str(user_id),
+        "exp": datetime.now(timezone.utc) + timedelta(days=JWT_EXPIRE_DAYS),
+    }
+    return pyjwt.encode(payload, settings.jwt_secret_key, algorithm=JWT_ALGORITHM)
+
+
+def decode_jwt(token: str) -> int:
+    """JWT에서 user_id 추출. 유효하지 않으면 HTTPException 발생."""
+    try:
+        payload = pyjwt.decode(token, settings.jwt_secret_key, algorithms=[JWT_ALGORITHM])
+        return int(payload["sub"])
+    except pyjwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="토큰이 만료되었습니다. 다시 로그인해주세요.")
+    except pyjwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="토큰이 유효하지 않습니다.")
 
 
 def _get_redis():
@@ -117,8 +141,56 @@ def google_login():
     return {"auth_url": url}
 
 
+@router.get("/google/extension")
+def google_extension_login():
+    """Chrome Extension 전용 Google OAuth — 완료 후 JWT를 extension-done 페이지로 전달."""
+    import urllib.parse
+    params = {
+        "client_id": settings.google_client_id,
+        "redirect_uri": settings.google_redirect_uri,
+        "response_type": "code",
+        "scope": (
+            "https://www.googleapis.com/auth/calendar.readonly "
+            "https://www.googleapis.com/auth/youtube.readonly "
+            "https://www.googleapis.com/auth/userinfo.email "
+            "https://www.googleapis.com/auth/userinfo.profile"
+        ),
+        "access_type": "offline",
+        "prompt": "consent",
+        "state": "extension",
+    }
+    url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params)
+    return RedirectResponse(url=url)
+
+
+@router.get("/extension-done", response_class=HTMLResponse)
+def extension_done(token: str):
+    """Extension OAuth 완료 페이지 — auth-callback.js content script가 JWT를 읽어 저장."""
+    html = f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>PaperBack 로그인 완료</title>
+  <style>
+    body {{ font-family: sans-serif; display: flex; align-items: center;
+           justify-content: center; height: 100vh; margin: 0; background: #f5f5f5; }}
+    .box {{ text-align: center; padding: 40px; border-radius: 12px;
+            background: #fff; box-shadow: 0 2px 16px rgba(0,0,0,.1); }}
+    h2 {{ color: #4f46e5; }} p {{ color: #666; }}
+  </style>
+</head>
+<body>
+  <div class="box" id="paperback-auth-done" data-token="{token}">
+    <h2>로그인 완료</h2>
+    <p>이 탭은 자동으로 닫힙니다.</p>
+  </div>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
+
+
 @router.get("/google/callback")
-def google_callback(code: str, db: Session = Depends(get_db)):
+def google_callback(code: str, state: str = "", db: Session = Depends(get_db)):
     resp = httpx.post(
         "https://oauth2.googleapis.com/token",
         data={
@@ -151,6 +223,10 @@ def google_callback(code: str, db: Session = Depends(get_db)):
         seconds=tokens.get("expires_in", 3600)
     )
     db.commit()
+
+    if state == "extension":
+        token = _issue_jwt(user.id)
+        return RedirectResponse(url=f"/auth/extension-done?token={token}")
 
     return {"message": "Google 연동 완료", "user_id": user.id, "email": email}
 
