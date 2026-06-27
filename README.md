@@ -99,9 +99,9 @@ Phase 2가 소스별로 각각 처리하면 코드가 복잡해지고, 소스가
 ### Spotify
 Spotify API는 최근 50곡까지만 한 번에 가져올 수 있습니다. 4시간마다 폴링하면서 `spotify_last_cursor_ms`를 users 테이블에 저장해서 중복을 방지합니다.
 
-`audio_features` API로 valence(0=슬픔, 1=행복), energy 수치를 가져옵니다.
+`audio_features` API(valence, energy)는 신규 앱에서 막혀 있어 장르 기반 mood 추정(`GENRE_MOOD` 매핑)으로 대체 구현되어 있습니다. Spotify Extended Quota 승인 시 실제 수치로 자동 전환됩니다.
 
-> **현재 상태**: Spotify Premium 계정 필요. 앱 오너 계정 업그레이드 후 재테스트 예정.
+> **현재 상태**: 테스트 완료 ✅. 단, Spotify 앱이 Development Mode라 테스트 가능 계정을 앱 오너가 직접 추가해야 합니다 (아래 "테스트 사용자 추가" 참고).
 
 ### Google Calendar
 어제 일정만 수집합니다. `duration_min`, `attendee_count`, `is_recurring`을 저장해서 "오늘은 미팅이 많은 날"이라는 맥락을 뽑을 수 있게 합니다.
@@ -120,15 +120,29 @@ PNG이거나 EXIF가 없는 파일은 스크린샷으로 판단하여 Google Vis
 
 ## 자동 수집 스케줄
 
-Celery Beat가 백그라운드에서 실행합니다. Railway에서는 worker 서비스를 별도로 띄워야 합니다.
+Railway 배포 서버에서 Celery Beat가 자동으로 실행 중입니다 (web + worker 단일 컨테이너).
 
 | 태스크 | 시각 | 내용 |
 |--------|------|------|
-| `collect_daily` | 매일 00:30 KST | Calendar, 사진 EXIF 수집 |
-| `normalize_and_trigger` | 매일 01:00 KST | 수집된 데이터 → unified_documents 정규화 |
+| `collect_daily` | 매일 00:30 KST | Calendar 수집 |
+| `normalize_and_trigger` | 매일 01:00 KST | 수집 데이터 → unified_documents 정규화 → Phase 2 자동 트리거 |
 | `collect_spotify_task` | 4시간마다 | Spotify 최근 재생 폴링 |
 
-Chrome과 YouTube는 Extension이 실시간으로 서버에 push합니다.
+Chrome과 YouTube는 Extension이 실시간으로 서버에 push합니다.  
+사진은 `POST /photos/upload`로 수동 업로드합니다.
+
+---
+
+## 테스트 사용자 추가 방법
+
+팀원이 배포 서버에서 OAuth 로그인을 테스트하려면 앱 오너가 아래 두 곳에 이메일을 추가해야 합니다.
+
+### Google
+[Google Cloud Console](https://console.cloud.google.com) → API 및 서비스 → OAuth 동의 화면 → **테스트 사용자** → 이메일 추가
+
+### Spotify
+[Spotify Developer Dashboard](https://developer.spotify.com/dashboard) → 앱 선택 → Settings → **User Management** → 이메일 추가  
+(Development Mode 앱은 최대 25명까지 추가 가능)
 
 ---
 
