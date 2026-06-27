@@ -123,9 +123,15 @@ async function collectHistory() {
 
 // ---- 배치 전송 ----
 async function sendBatch() {
-  const config = await chrome.storage.sync.get(["apiUrl", "authToken"]);
+  const config = await chrome.storage.sync.get(["apiUrl", "authToken", "userId"]);
   const apiUrl = config.apiUrl || DEFAULT_API_URL;
   const authToken = config.authToken || "";
+  const userId = config.userId ? parseInt(config.userId, 10) : null;
+
+  if (!userId) {
+    console.warn("[PaperBack] userId not configured — skipping send. Set it in the popup.");
+    return;
+  }
 
   const data = await chrome.storage.local.get([
     "pendingRecords",
@@ -134,16 +140,18 @@ async function sendBatch() {
   const pendingRecords = data.pendingRecords || [];
   const youtubeRecords = data.youtubeRecords || [];
 
+  const headers = {
+    "Content-Type": "application/json",
+    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+  };
+
   // 브라우징 기록 전송
   if (pendingRecords.length > 0) {
     try {
       const response = await fetch(`${apiUrl}/browsing/batch`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-        },
-        body: JSON.stringify({ records: pendingRecords }),
+        headers,
+        body: JSON.stringify({ user_id: userId, records: pendingRecords }),
       });
 
       if (response.ok) {
@@ -167,11 +175,8 @@ async function sendBatch() {
     try {
       const response = await fetch(`${apiUrl}/browsing/youtube-detect`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-        },
-        body: JSON.stringify({ records: youtubeRecords }),
+        headers,
+        body: JSON.stringify({ user_id: userId, records: youtubeRecords }),
       });
 
       if (response.ok) {

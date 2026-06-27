@@ -4,8 +4,9 @@
 
 document.addEventListener("DOMContentLoaded", async () => {
   // 설정 불러오기
-  const config = await chrome.storage.sync.get(["apiUrl", "authToken"]);
+  const config = await chrome.storage.sync.get(["apiUrl", "authToken", "userId"]);
   document.getElementById("apiUrl").value = config.apiUrl || "http://localhost:8000";
+  document.getElementById("userId").value = config.userId || "";
   document.getElementById("authToken").value = config.authToken || "";
 
   // 통계 불러오기
@@ -32,8 +33,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   // 저장 버튼
   document.getElementById("saveBtn").addEventListener("click", async () => {
     const apiUrl = document.getElementById("apiUrl").value.trim();
+    const userId = document.getElementById("userId").value.trim();
     const authToken = document.getElementById("authToken").value.trim();
-    await chrome.storage.sync.set({ apiUrl, authToken });
+    await chrome.storage.sync.set({ apiUrl, userId, authToken });
 
     const msg = document.getElementById("saveMsg");
     msg.style.display = "block";
