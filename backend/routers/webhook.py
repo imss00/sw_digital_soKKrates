@@ -45,9 +45,11 @@ def trigger_notion(
 @router.post("/normalize")
 def trigger_normalize(
     user_id: int = 1,
+    target_date: str | None = None,
     db: Session = Depends(get_db),
     _: None = Depends(_verify_secret),
 ):
     from backend.normalizer.normalize import normalize_daily
     from datetime import date
-    return normalize_daily(user_id=user_id, target_date=date.today(), db=db)
+    parsed = date.fromisoformat(target_date) if target_date else date.today()
+    return normalize_daily(user_id=user_id, target_date=parsed, db=db)
