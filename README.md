@@ -8,11 +8,11 @@
 
 | | URL |
 |--|-----|
-| **API 서버** | https://swdigitalsokkrates-production.up.railway.app |
-| **Swagger 문서** | https://swdigitalsokkrates-production.up.railway.app/docs |
-| **헬스체크** | https://swdigitalsokkrates-production.up.railway.app/health |
+| **API 서버** | https://paperback-agent.fly.dev |
+| **Swagger 문서** | https://paperback-agent.fly.dev/docs |
+| **헬스체크** | https://paperback-agent.fly.dev/health |
 
-DB(Supabase), Redis(Upstash), 앱 서버(Railway) 모두 클라우드에 올라가 있습니다.  
+DB(Supabase), Redis(Upstash), 앱 서버(Fly.io) 모두 클라우드에 올라가 있습니다.  
 **Phase 2-3 팀원은 로컬 환경 세팅 없이 위 URL로 바로 API를 호출하면 됩니다.**
 
 ---
@@ -120,7 +120,7 @@ PNG이거나 EXIF가 없는 파일은 스크린샷으로 판단하여 Google Vis
 
 ## 자동 수집 스케줄
 
-Railway 배포 서버에서 Celery Beat가 자동으로 실행 중입니다 (web + worker 단일 컨테이너).
+Fly.io 배포 서버에서 Celery Beat가 자동으로 실행 중입니다 (web + worker 단일 컨테이너).
 
 | 태스크 | 시각 | 내용 |
 |--------|------|------|
@@ -178,7 +178,7 @@ run_phase2(user_id=1, target_date_str="2026-06-27")
 
 ### FAISS 주의사항
 
-Railway 배포 환경에서는 파일로 FAISS 인덱스를 저장하면 재배포 시 사라집니다.
+Fly.io 배포 환경에서는 파일로 FAISS 인덱스를 저장하면 재배포 시 사라집니다.
 `recommender.py`는 **인메모리** 방식으로 설계되어 있습니다 (호출마다 당일 벡터로 재구성).
 주간 누적이 필요하면 벡터를 DB에 쌓고 부팅 시 로드하는 방식으로 확장하세요.
 
@@ -246,6 +246,7 @@ backend/
   routers/        ← FastAPI 엔드포인트
   tasks/          ← Celery 스케줄러
 chrome-extension/ ← 브라우저 히스토리 수집기
-Dockerfile        ← Railway 배포용 (Python 3.12)
-railway.toml      ← Railway 빌드 설정
+Dockerfile        ← 배포용 (Python 3.12)
+fly.toml          ← Fly.io 배포 설정
+railway.toml      ← Railway 빌드 설정 (미사용)
 ```
