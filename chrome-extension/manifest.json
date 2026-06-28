@@ -25,7 +25,7 @@
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://swdigitalsokkrates-production.up.railway.app/auth/extension-done*"],
+      "matches": ["https://paperback-agent.fly.dev/auth/extension-done*"],
       "js": ["auth-callback.js"],
       "run_at": "document_idle"
     }

@@ -1,4 +1,4 @@
-const API_BASE = "https://swdigitalsokkrates-production.up.railway.app";
+const API_BASE = "https://paperback-agent.fly.dev";
 
 document.addEventListener("DOMContentLoaded", async () => {
   const { jwt } = await chrome.storage.local.get("jwt");
