@@ -143,10 +143,11 @@ Chrome과 YouTube는 Extension이 실시간으로 서버에 push합니다.
 
 ```
 backend/analysis/
-  embedder.py        ← 역할 A: OpenAI 임베딩 생성 + DB 저장
-  clusterer.py       ← 역할 A: DBSCAN 클러스터링 + cluster_id 저장
-  recommender.py     ← 역할 A: RSS 수집 + FAISS 유사도 검색 + Spotify 무드
-  journal_composer.py← 역할 B: Claude 키워드/회고/포커스/기사소개/저널 편집
+  embedder.py        ← 역할 A: Gemini 임베딩 생성 + DB 저장 ✅구현완료
+  clusterer.py       ← 역할 A: HDBSCAN 클러스터링 + cluster_id 저장 ✅구현완료
+  recommender.py     ← 역할 A: RSS 수집 + FAISS 유사도 검색 + Spotify 무드 + 구조화 JSON 산출 ✅구현완료
+  journal_input.py   ← 역할 A: 최종 구조화 JSON 어셈블러 (역할 B 입력) ✅구현완료
+  journal_composer.py← 역할 B: Gemini 키워드/회고/포커스/기사소개/저널 편집
 
 backend/tasks/
   analysis_tasks.py  ← Phase 2-3 Celery 태스크 (자정 정규화 완료 후 자동 실행)
@@ -157,10 +158,11 @@ backend/tasks/
 ```
 (자정) collection_tasks.normalize_and_trigger()
     → analysis_tasks.run_phase2(user_id, date)
-        → embedder.embed_and_store()       # OpenAI 임베딩 → embedding_json 저장
-        → clusterer.run_clustering()       # DBSCAN → cluster_id 저장
-        → recommender.run_recommendation() # RSS + FAISS + Spotify 무드
-        → journal_composer.run_journal_composition()  # Claude → 저널 텍스트
+        → embedder.embed_and_store()       # Gemini 임베딩 → embedding_json 저장
+        → clusterer.run_clustering()       # HDBSCAN → cluster_id 저장
+        → recommender.run_recommendation() # RSS(한·영) + FAISS + Spotify 무드
+                                           #   + core_theme + 구조화 JSON("structured") 산출
+        → journal_composer.run_journal_composition()  # Gemini → 저널 텍스트
 ```
 
 ### 수동 테스트 방법
@@ -175,6 +177,44 @@ POST /webhook/normalize?user_id=1   # 정규화 (Phase 1 → unified_documents)
 from backend.tasks.analysis_tasks import run_phase2
 run_phase2(user_id=1, target_date_str="2026-06-27")
 ```
+
+### 역할 A 산출물 — 구조화 JSON (역할 B 입력 인터페이스)
+
+`recommender.run_recommendation()`이 반환하는 dict는 역할 B(journal_composer)가 그대로 받습니다.
+기존 키(`interest_clusters`/`recommended_articles`/`music_recommendation`/`mood_summary`)에 더해
+역할 A가 다음을 채워 넘깁니다.
+
+- **`core_theme`** (str) — 하루를 관통하는 핵심 테마 한 줄. 클러스터/문서 내용을 Gemini로 요약(실패 시 결정적 폴백). 역할 B의 회고·기사소개 재료.
+- **`structured`** (dict) — 역할 A의 최종 구조화 JSON. `journal_input.assemble_journal_input()`이 조립.
+
+```jsonc
+{
+  "date": "2026-06-27",
+  "photo":    { "_available": false, ... },          // 장면 라벨(LABEL_DETECTION) 미수집 → 비움
+  "youtube":  { "_available": true,  "youtube_keywords": [...], "top_category": "음악",
+                "total_watch_time": "19시간 4분", ... },
+  "music":    { "_available": true,  "yesterday_tracks": [{ "title","artist","count" }],
+                "rec_track_1": { "title","artist","album","year","label" }, "rec_reason": "..." },
+  "headline": { "top_category","music_genre","youtube_keyword","photo_keywords" },
+  "recommended_articles": [ { "title","summary","link","relevance_score" } ]
+}
+```
+
+**설계 원칙**
+- **3단 폴백**: 구조화 원본값(YouTubeHistory/SpotifyHistory) → `content_text` 파싱 → placeholder.
+- **날조 금지**: 데이터 근거 없으면 채우지 않고 각 섹션에 `_available`/`_source` 플래그를 달아 역할 B가 placeholder를 사실로 오해하지 않게 함.
+- **Spotify 제약**: `audio_features`/`/recommendations`는 신규 앱에서 403. 무드는 장르 기반 추정(`GENRE_MOOD`), 추천곡 메타데이터(album/year/label)는 살아있는 **search + album 엔드포인트로 실값 조회**.
+- **photo**: 현재 OCR(TEXT_DETECTION)만이라 장면 키워드 grounding 불가 → `_available:false`. (Phase 1에 LABEL_DETECTION 추가 시 해소)
+
+### RSS 피드 (한·영 혼합)
+
+한국인 사용자에 맞춰 한국 언론사 RSS를 추가했습니다 (`recommender.RSS_FEEDS`).
+- **한국 종합**: 연합뉴스 · 경향신문 · 동아일보
+- **한국 IT**: 전자신문 · IT동아
+- **글로벌**: NYT Technology · The Verge
+
+> 네이버 뉴스는 공식 RSS를 제공하지 않습니다(서비스 종료). 네이버 소스가 필요하면 네이버 검색 API(Client ID/Secret) 연동이 별도로 필요합니다.
+> 일부 매체(The Verge 등)는 기본 UA를 차단하므로 수집기에 브라우저 User-Agent 헤더를 사용합니다.
 
 ### FAISS 주의사항
 
@@ -198,8 +238,9 @@ cp .env.example .env
 | `REDIS_URL` | Upstash → Database → Connect (`rediss://` 형식) |
 | `GOOGLE_CLIENT_ID/SECRET` | console.cloud.google.com |
 | `GOOGLE_API_KEY` | console.cloud.google.com (YouTube Data API v3) |
-| `ANTHROPIC_API_KEY` | console.anthropic.com |
-| `OPENAI_API_KEY` | platform.openai.com |
+| `GEMINI_API_KEY` | aistudio.google.com (임베딩·클러스터 요약·저널 생성에 사용) |
+| `ANTHROPIC_API_KEY` | console.anthropic.com (legacy, 현재 미사용) |
+| `OPENAI_API_KEY` | platform.openai.com (legacy, 현재 미사용) |
 
 ### 2. 패키지 설치
 ```bash
