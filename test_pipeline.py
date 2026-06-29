@@ -34,6 +34,7 @@ def run_test():
     print("🚀 [3단계] HyDE 미끼 생성 및 FAISS 실제 뉴스 매칭 가동...")
     recommend_res = run_recommendation(user_id, target_date, db)
     print(f"👉 3단계 도출된 핵심 관심사 테마:\n{recommend_res.get('core_theme')}\n")
+    print(f"👉 HyDE 가상 문서(검색 질의):\n{recommend_res.get('hyde_document')}\n")
     print(f"👉 매칭된 실제 기사 개수: {len(recommend_res.get('recommended_articles', []))}개\n")
 
     # 역할 A 최종 산출물 — 구조화 JSON 출력
