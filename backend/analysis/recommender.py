@@ -187,6 +187,44 @@ def summarize_core_theme(interest_clusters: list[dict], docs: list) -> str:
         return deterministic
 
 
+# ── HyDE (Hypothetical Document Embeddings) ──────────────────────
+
+def generate_hyde_document(core_theme: str, interest_clusters: list[dict]) -> str | None:
+    """
+    HyDE: 사용자의 관심사로부터 '이상적인 뉴스 기사'를 가상으로 한 단락 생성한다.
+    이 가상 문서를 임베딩해 FAISS 검색 질의로 쓰면, 짧은 키워드/원문 평균보다
+    실제 기사와 같은 표현 공간에서 매칭돼 추천 정확도가 올라간다.
+
+    raw 질의(사용자 문서 평균) 대신 '답변처럼 생긴 문서'를 만들어 검색하는 것이 HyDE의 핵심.
+    Gemini 실패/테마 없음 시 None을 반환해 호출부가 기존 centroid 방식으로 폴백한다.
+    """
+    if not core_theme or core_theme == DEFAULT_CORE_THEME:
+        return None
+    try:
+        from google import genai
+
+        client = genai.Client()
+        cluster_hint = ""
+        if interest_clusters:
+            tops = []
+            for c in interest_clusters[:3]:
+                tops.extend(c.get("keywords", [])[:3])
+            if tops:
+                cluster_hint = "\n참고 키워드: " + ", ".join(dict.fromkeys(tops))
+        prompt = (
+            "아래 사용자의 오늘 관심사를 바탕으로, 이 사용자가 가장 읽고 싶어 할 "
+            "'이상적인 뉴스 기사'의 도입부를 한국어 3~4문장으로 가상으로 작성하세요.\n"
+            "실제 사실일 필요는 없습니다. 관심사를 잘 반영한 실제 기사처럼 자연스럽게 쓰고, "
+            "마크다운/제목 없이 본문만 출력하세요.\n\n"
+            f"핵심 관심사: {core_theme}{cluster_hint}"
+        )
+        resp = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+        doc = (resp.text or "").strip()
+        return doc or None
+    except Exception:
+        return None
+
+
 # ── 통합 추천 실행 ──────────────────────────────────────────────
 
 def run_recommendation(user_id: int, target_date: date, db: Session) -> dict:
@@ -218,6 +256,9 @@ def run_recommendation(user_id: int, target_date: date, db: Session) -> dict:
     # 핵심 테마 한 줄 요약 → 역할 B가 core_theme 키로 받아 회고/기사소개에 주입
     core_theme = summarize_core_theme(interest_clusters, docs)
 
+    # HyDE: 관심사로 '가상의 이상적 기사'를 생성 → 검색 질의로 사용 (실패 시 None)
+    hyde_document = generate_hyde_document(core_theme, interest_clusters)
+
     mood = analyze_yesterday_mood(user_id, target_date, db)
 
     # RSS 기사 추천 구현 활성화
@@ -228,8 +269,16 @@ def run_recommendation(user_id: int, target_date: date, db: Session) -> dict:
             # 임베딩은 외부 API 호출이므로 예외 안전하게 처리
             article_embeddings = np.array(embed_texts(article_texts), dtype=np.float32)
             user_vectors = np.array([json.loads(d.embedding_json) for d in docs], dtype=np.float32)
-            if user_vectors.size and article_embeddings.size:
-                recommended_articles = recommend_articles(user_vectors, article_embeddings, articles)
+
+            # 질의 벡터: HyDE 가상 문서 임베딩 우선, 실패 시 사용자 문서 평균(centroid)으로 폴백
+            query_vectors = user_vectors
+            if hyde_document:
+                hyde_vec = np.array(embed_texts([hyde_document]), dtype=np.float32)
+                if hyde_vec.size:
+                    query_vectors = hyde_vec
+
+            if query_vectors.size and article_embeddings.size:
+                recommended_articles = recommend_articles(query_vectors, article_embeddings, articles)
             else:
                 recommended_articles = []
         else:
@@ -254,6 +303,7 @@ def run_recommendation(user_id: int, target_date: date, db: Session) -> dict:
 
     return {
         "core_theme": core_theme,
+        "hyde_document": hyde_document,  # HyDE 가상 문서 (검색 질의로 사용, 시연/디버그용 노출)
         "interest_clusters": interest_clusters,
         "recommended_articles": recommended_articles,
         "music_recommendation": music_recommendation,
