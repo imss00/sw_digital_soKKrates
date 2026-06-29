@@ -1,3 +1,5 @@
+import os
+
 from pydantic_settings import BaseSettings
 
 
@@ -33,6 +35,7 @@ class Settings(BaseSettings):
     # AI
     anthropic_api_key: str = ""
     openai_api_key: str = ""
+    gemini_api_key: str = ""
 
     # Webhook secret (설정 시 X-Webhook-Secret 헤더 검증, 미설정 시 로컬 개발용 무인증)
     webhook_secret: str = ""
@@ -45,3 +48,6 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+if settings.gemini_api_key and not os.environ.get("GOOGLE_API_KEY"):
+    os.environ["GOOGLE_API_KEY"] = settings.gemini_api_key

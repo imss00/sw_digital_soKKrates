@@ -240,12 +240,16 @@ def run_journal_composition(
     )
 
     mood = analysis_result.get("music_recommendation", {})
-    music_text = (
-        f"어제 무드: {mood.get('mood', '?')} "
-        f"(valence {mood.get('avg_valence', '?'):.2f})\n"
-        f"TODO: Spotify 플레이리스트 링크"
-        if isinstance(mood, dict) else str(mood)
-    )
+    if isinstance(mood, dict):
+        mood_name = mood.get("mood", "?")
+        avg_val = mood.get("avg_valence", "?")
+        try:
+            avg_val_fmt = f"{float(avg_val):.2f}"
+        except Exception:
+            avg_val_fmt = str(avg_val)
+        music_text = f"어제 무드: {mood_name} (valence {avg_val_fmt})\nTODO: Spotify 플레이리스트 링크"
+    else:
+        music_text = str(mood)
 
     schedule_text = "\n".join(f"{s['time']} {s['title']}" for s in schedule) or "일정 없음"
 

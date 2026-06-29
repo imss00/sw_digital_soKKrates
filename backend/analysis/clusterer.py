@@ -1,12 +1,12 @@
 """
-역할 A — A-2. DBSCAN 클러스터링 (RAPTOR 1단계 적용)
+역할 A — A-2. HDBSCAN 클러스터링 (RAPTOR 1단계 적용 🚀)
 임베딩 벡터를 클러스터링해서 관심 주제 그룹을 만들고 unified_documents.cluster_id에 저장.
 """
 import json
 from datetime import date, datetime, timedelta, timezone
 
 import numpy as np
-from sklearn.cluster import DBSCAN
+import hdbscan
 from sklearn.metrics.pairwise import cosine_distances
 from sqlalchemy.orm import Session
 
@@ -17,23 +17,23 @@ KST = timezone(timedelta(hours=9))
 
 def cluster_embeddings(vectors: np.ndarray) -> np.ndarray:
     """
-    DBSCAN으로 벡터 클러스터링. 라벨 배열 반환 (-1은 노이즈).
+    HDBSCAN으로 벡터 클러스터링. 라벨 배열 반환 (-1은 노이즈).
     
-    eps, min_samples 튜닝 가이드:
-      eps=0.2 → 엄격 (클러스터 적고 노이즈 많음)
-      eps=0.3 → 기본값 (권장)
-      eps=0.5 → 느슨 (다양한 주제가 합쳐짐)
+    기존 DBSCAN의 치명적 단점이었던 고정된 eps(거리) 값을 설정할 필요 없이,
+    계층적 밀도(Hierarchical Density)를 기반으로 가장 안정적인 군집을 스스로 찾아냅니다.
     """
-    # 코사인 거리 계산 (1 - 코사인 유사도)
-    distance_matrix = cosine_distances(vectors)
+    # 코사인 거리 계산 (HDBSCAN 연산을 위해 float64 타입으로 변환)
+    distance_matrix = cosine_distances(vectors).astype(np.float64)
     
-    # DBSCAN 군집화 연산
-    labels = DBSCAN(
-        eps=0.3,
-        min_samples=2,
+    # HDBSCAN 군집화 연산
+    # 하루 치 데이터(보통 10~20건 내외)의 특성을 고려하여 파라미터 세팅
+    clusterer = hdbscan.HDBSCAN(
+        min_cluster_size=2,  # 최소 2개 이상 모여야 유의미한 테마(클러스터)로 인정
+        min_samples=1,       # 노이즈 판별을 조금 덜 엄격하게 하여 파편화된 데이터도 잘 묶이도록 유도
         metric="precomputed",
-    ).fit_predict(distance_matrix)
+    )
     
+    labels = clusterer.fit_predict(distance_matrix)
     return labels
 
 
@@ -83,7 +83,7 @@ def run_clustering(user_id: int, target_date: date, db: Session) -> dict:
     # 2. JSON으로 저장된 좌표 리스트를 수학 연산용 배열(numpy)로 변환
     vectors = np.array([json.loads(doc.embedding_json) for doc in docs], dtype=np.float32)
     
-    # 3. DBSCAN 알고리즘으로 가까운 관심사끼리 그룹(라벨) 달기
+    # 3. HDBSCAN 알고리즘으로 가까운 관심사끼리 그룹(라벨) 달기
     labels = cluster_embeddings(vectors)
 
     # 4. 판별된 그룹 번호(cluster_id)를 DB 데이터에 업데이트
