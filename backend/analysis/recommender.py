@@ -23,18 +23,21 @@ from backend.analysis.embedder import embed_texts
 KST = timezone(timedelta(hours=9))
 
 RSS_FEEDS = [
-    # 한국 종합 뉴스 (한국인 사용자용 — 2026-06 기준 RSS 제공 확인)
-    "https://www.yna.co.kr/rss/news.xml",                      # 연합뉴스 종합
-    "https://www.khan.co.kr/rss/rssdata/total_news.xml",      # 경향신문 종합
-    "https://rss.donga.com/total.xml",                         # 동아일보 종합
-    # 한국 IT/기술 뉴스
+    # ── 전 주제 커버: 연합뉴스 섹션별 (각 최대 10건, 2026-07 기준 RSS 제공 확인) ──
+    # 어떤 관심사(정치·경제·문화·스포츠·건강 등)든 후보 기사가 존재하도록 광범위하게 수집.
+    "https://www.yna.co.kr/rss/politics.xml",                  # 정치
+    "https://www.yna.co.kr/rss/economy.xml",                   # 경제
+    "https://www.yna.co.kr/rss/industry.xml",                  # 산업/기업
+    "https://www.yna.co.kr/rss/society.xml",                   # 사회
+    "https://www.yna.co.kr/rss/international.xml",              # 국제
+    "https://www.yna.co.kr/rss/culture.xml",                   # 문화
+    "https://www.yna.co.kr/rss/entertainment.xml",             # 연예(음악·K-pop 포함)
+    "https://www.yna.co.kr/rss/sports.xml",                    # 스포츠
+    "https://www.yna.co.kr/rss/health.xml",                    # 건강/의학
+    # ── 심화 IT/기술 (개발·AI 관심 사용자용) ──
     "https://rss.etnews.com/Section901.xml",                   # 전자신문 IT
     "https://it.donga.com/feeds/rss/",                         # IT동아
-    # 비기술 다양성 피드 (음악/문화/스포츠 관심사도 매칭되게 후보 풀 다변화)
-    "https://www.yna.co.kr/rss/culture.xml",                   # 연합뉴스 문화
-    "https://www.yna.co.kr/rss/entertainment.xml",             # 연합뉴스 연예(음악·K-pop 포함)
-    "https://www.yna.co.kr/rss/sports.xml",                    # 연합뉴스 스포츠
-    # 글로벌 기술 뉴스 (한·영 혼합 추천을 위해 유지)
+    # ── 글로벌 (한·영 혼합 추천용) ──
     "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml",
     "https://www.theverge.com/rss/index.xml",
 ]
