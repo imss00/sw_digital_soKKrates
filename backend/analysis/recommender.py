@@ -141,6 +141,30 @@ def analyze_yesterday_mood(user_id: int, target_date: date, db: Session) -> dict
     }
 
 
+# ── 텍스트 생성 (Claude Haiku 4.5) ────────────────────────────────
+
+GEN_MODEL = "claude-haiku-4-5"
+
+
+def _call_claude(prompt: str, max_tokens: int) -> str:
+    """Claude로 짧은 텍스트 생성. 실패 시 예외를 그대로 올려 호출부가 폴백하게 한다.
+
+    Gemini 대신 Claude를 쓰는 이유: Gemini 무료 한도/계정 정지로 파이프라인이 막히는 걸 방지.
+    ANTHROPIC_API_KEY(.env)가 필요하다. 호출량이 적어(1회 완주 ≈ 2회) 비용은 미미하다.
+    """
+    import anthropic
+
+    client = anthropic.Anthropic()
+    resp = client.messages.create(
+        model=GEN_MODEL,
+        max_tokens=max_tokens,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return "".join(
+        b.text for b in resp.content if getattr(b, "type", None) == "text"
+    ).strip()
+
+
 # ── 핵심 테마 요약 (역할 B가 core_theme 키로 소비) ─────────────────
 
 DEFAULT_CORE_THEME = "특별한 관심사가 감지되지 않았습니다."
@@ -152,7 +176,7 @@ def summarize_core_theme(interest_clusters: list[dict], docs: list) -> str:
     역할 B(journal_composer)가 analysis_result["core_theme"]로 받아 회고/기사소개의 재료로 쓴다.
 
     날조 금지: 실제 클러스터 대표 텍스트만 근거로 요약한다.
-    Gemini 호출 실패/데이터 없음 시 결정적(deterministic) 폴백으로 안전하게 떨어진다.
+    LLM 호출 실패/데이터 없음 시 결정적(deterministic) 폴백으로 안전하게 떨어진다.
     """
     # 1) 요약 근거 텍스트 수집: 클러스터 우선(doc_count 큰 순), 없으면 문서 content_text
     snippets: list[str] = []
@@ -165,14 +189,11 @@ def summarize_core_theme(interest_clusters: list[dict], docs: list) -> str:
     if not snippets:
         return DEFAULT_CORE_THEME
 
-    # 결정적 폴백 문구 (Gemini 실패 시 사용): 대표 토막 몇 개를 이어붙임
+    # 결정적 폴백 문구 (LLM 실패 시 사용): 대표 토막 몇 개를 이어붙임
     deterministic = " · ".join(dict.fromkeys(snippets[:5]))
 
-    # 2) Gemini로 자연스러운 한 줄 테마 생성 (근거 텍스트만 제공 → 날조 방지)
+    # 2) Claude로 자연스러운 한 줄 테마 생성 (근거 텍스트만 제공 → 날조 방지)
     try:
-        from google import genai
-
-        client = genai.Client()
         joined = "\n".join(f"- {s}" for s in snippets[:15])
         prompt = (
             "다음은 사용자가 하루 동안 남긴 디지털 활동의 대표 조각들입니다.\n"
@@ -180,8 +201,7 @@ def summarize_core_theme(interest_clusters: list[dict], docs: list) -> str:
             "제공된 내용에 없는 사실을 지어내지 말고, 마크다운/따옴표 없이 문장만 출력하세요.\n\n"
             f"{joined}"
         )
-        resp = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
-        theme = (resp.text or "").strip().strip('"').strip()
+        theme = _call_claude(prompt, max_tokens=200).strip('"').strip()
         return theme or deterministic
     except Exception:
         return deterministic
@@ -196,14 +216,11 @@ def generate_hyde_document(core_theme: str, interest_clusters: list[dict]) -> st
     실제 기사와 같은 표현 공간에서 매칭돼 추천 정확도가 올라간다.
 
     raw 질의(사용자 문서 평균) 대신 '답변처럼 생긴 문서'를 만들어 검색하는 것이 HyDE의 핵심.
-    Gemini 실패/테마 없음 시 None을 반환해 호출부가 기존 centroid 방식으로 폴백한다.
+    LLM 실패/테마 없음 시 None을 반환해 호출부가 기존 centroid 방식으로 폴백한다.
     """
     if not core_theme or core_theme == DEFAULT_CORE_THEME:
         return None
     try:
-        from google import genai
-
-        client = genai.Client()
         cluster_hint = ""
         if interest_clusters:
             tops = []
@@ -218,8 +235,7 @@ def generate_hyde_document(core_theme: str, interest_clusters: list[dict]) -> st
             "마크다운/제목 없이 본문만 출력하세요.\n\n"
             f"핵심 관심사: {core_theme}{cluster_hint}"
         )
-        resp = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
-        doc = (resp.text or "").strip()
+        doc = _call_claude(prompt, max_tokens=500)
         return doc or None
     except Exception:
         return None

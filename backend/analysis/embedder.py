@@ -1,42 +1,58 @@
 
 """
-역할 A — A-1. 임베딩 파이프라인 (Gemini 버전 🚀)
-unified_documents의 content_text를 구글 Gemini 벡터로 변환하고 DB에 저장한다.
+역할 A — A-1. 임베딩 파이프라인 (로컬 bge-m3 버전 🚀)
+unified_documents의 content_text를 로컬 임베딩 모델(BAAI/bge-m3)로 벡터화하고 DB에 저장한다.
+
+Gemini API 대신 로컬 모델을 쓰는 이유:
+- API 한도(무료 일일 한도)·계정 정지 리스크 없음 → 반복 테스트에 안전
+- 비용 0, 인터넷/키 불필요
+- bge-m3는 다국어(한국어 강함) 모델이라 한국어 활동/기사 매칭에 적합
 """
 import json
-import os
 from datetime import date, datetime, timedelta, timezone
 
-from google import genai
 from sqlalchemy.orm import Session
 
 from backend.models.unified_document import UnifiedDocument
 
 KST = timezone(timedelta(hours=9))
-# OpenAI 대신 우리가 검증한 최신 Gemini 임베딩 모델 사용
-EMBEDDING_MODEL = "gemini-embedding-001"  
+
+# 로컬 임베딩 모델 (다국어·한국어) — 1024차원
+EMBEDDING_MODEL = "BAAI/bge-m3"
+EMBEDDING_DIM = 1024
+
+# 모델은 무거우므로 프로세스당 1회만 로드하는 싱글턴
+_MODEL = None
+
+
+def _get_model():
+    """SentenceTransformer 모델을 지연 로드(첫 호출 시 1회)."""
+    global _MODEL
+    if _MODEL is None:
+        from sentence_transformers import SentenceTransformer
+        _MODEL = SentenceTransformer(EMBEDDING_MODEL)
+    return _MODEL
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
-    """텍스트 배열을 Gemini API를 호출하여 임베딩 (벡터 좌표로 변환)"""
-    # .env 파일에 있는 GEMINI_API_KEY를 자동으로 읽어와서 작동합니다.
-    client = genai.Client()
-    
-    vectors = []
-    for text in texts:
-        # 텍스트가 비어있지 않은 경우에만 임베딩 수행
-        if text and text.strip():
-            response = client.models.embed_content(
-                model=EMBEDDING_MODEL,
-                contents=text
-            )
-            # 변환된 좌표(float 리스트)를 추출하여 추가
-            vectors.append(response.embeddings[0].values)
-        else:
-            # 빈 텍스트일 경우 더미(0) 벡터 삽입 (에러 방지용)
-            vectors.append([0.0] * 768) 
-            
-    return vectors
+    """텍스트 배열을 로컬 bge-m3 모델로 임베딩 (벡터 좌표로 변환).
+
+    빈 텍스트는 0 벡터로 채워 인덱스 정렬을 유지한다.
+    """
+    # 비어있지 않은 텍스트만 골라 한 번에 배치 인코딩(속도 ↑)
+    nonempty_idx = [i for i, t in enumerate(texts) if t and t.strip()]
+    out: list[list[float]] = [[0.0] * EMBEDDING_DIM for _ in texts]
+
+    if nonempty_idx:
+        model = _get_model()
+        vecs = model.encode(
+            [texts[i] for i in nonempty_idx],
+            normalize_embeddings=True,  # 코사인 유사도용 정규화
+        )
+        for j, i in enumerate(nonempty_idx):
+            out[i] = vecs[j].tolist()
+
+    return out
 
 
 def embed_and_store(user_id: int, target_date: date, db: Session) -> dict:
@@ -65,7 +81,7 @@ def embed_and_store(user_id: int, target_date: date, db: Session) -> dict:
     # 2. 가져온 데이터에서 텍스트만 쏙쏙 뽑아내기
     texts = [doc.content_text for doc in docs]
 
-    # 3. Gemini 공장에 넣어서 벡터(좌표)로 변환해 오기
+    # 3. 로컬 임베딩 모델에 넣어서 벡터(좌표)로 변환해 오기
     vectors = embed_texts(texts)
 
     # 4. 변환된 좌표를 다시 DB의 각 줄(row)에 예쁘게 JSON으로 저장하기
