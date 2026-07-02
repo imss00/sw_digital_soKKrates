@@ -1,6 +1,7 @@
 """
-역할 B — B-1~B-6. AI 저널 구성 (Gemini 통합 버전 🚀)
-Gemini API로 키워드 추출 / 회고 / 포커스 / 기사 소개 / 최종 저널 편집.
+역할 B — B-1~B-6. AI 저널 구성 (OpenAI 버전)
+OpenAI(gpt-4o-mini)로 회고 / 포커스 / 기사 소개 / 음악 / 사진 서사 생성.
+(역할 A와 동일 provider로 통일 → OPENAI_API_KEY 하나로 동작. Gemini 한도/정지 이슈 회피.)
 
 [설계 원칙]
 - 각 섹션마다 2~3가지 프롬프트 변형(variant)을 랜덤 선택 → 매일 다른 분위기의 저널 생성
@@ -15,27 +16,40 @@ import random
 import re
 from datetime import date, datetime, timedelta, timezone
 
-from google import genai
+from openai import OpenAI
 from sqlalchemy.orm import Session
 
 from backend.models.unified_document import UnifiedDocument
 from backend.models.calendar_event import CalendarEvent
+from backend.config import settings
 
 KST = timezone(timedelta(hours=9))
-LLM_MODEL = "gemini-2.5-flash"
+GEN_MODEL = "gpt-4o-mini"  # 퀄 아쉬우면 이 문자열만 교체 (예: gpt-5.4-mini)
 
-client = genai.Client()
+# 클라이언트는 프로세스당 1회만 생성(싱글턴). 키 없을 때 import에서 안 터지도록 지연 생성.
+_client = None
+
+
+def _get_client() -> OpenAI:
+    global _client
+    if _client is None:
+        _client = OpenAI(api_key=settings.openai_api_key or None)
+    return _client
 
 
 # ────────────────────────────────────────────────────────────────
-# 유틸: 안전한 Gemini 호출 + JSON 파싱
+# 유틸: 안전한 LLM 호출 + JSON 파싱
 # ────────────────────────────────────────────────────────────────
 
-def _call_gemini(prompt: str) -> str:
-    """Gemini 호출. 실패 시 빈 문자열 반환."""
+def _call_llm(prompt: str) -> str:
+    """OpenAI 호출. 실패 시 빈 문자열 반환."""
     try:
-        response = client.models.generate_content(model=LLM_MODEL, contents=prompt)
-        return (response.text or "").strip()
+        resp = _get_client().chat.completions.create(
+            model=GEN_MODEL,
+            max_tokens=800,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return (resp.choices[0].message.content or "").strip()
     except Exception:
         return ""
 
@@ -117,7 +131,7 @@ def generate_photo_narrative(photo_labels: list[dict]) -> str | None:
     )
 
     prompt = random.choice(_PHOTO_VARIANTS).format(labels_text=labels_text)
-    result = _call_gemini(prompt)
+    result = _call_llm(prompt)
     return result or None
 
 
@@ -169,7 +183,7 @@ def generate_daily_focus(schedule: list[dict], keywords: list[str]) -> str:
         schedule_text=schedule_text,
         interest_text=interest_text,
     )
-    return _call_gemini(prompt) or "오늘 하루도 충실하게."
+    return _call_llm(prompt) or "오늘 하루도 충실하게."
 
 
 # ────────────────────────────────────────────────────────────────
@@ -244,7 +258,7 @@ def generate_reflection(analysis_result: dict, core_theme: str) -> str:
         music_mood=music_mood,
         photo_narrative=photo_narrative or "없음",
     )
-    return _call_gemini(prompt) or "어제 하루의 기록을 불러오는 중입니다."
+    return _call_llm(prompt) or "어제 하루의 기록을 불러오는 중입니다."
 
 
 # ────────────────────────────────────────────────────────────────
@@ -304,7 +318,7 @@ def generate_article_intros(
         keywords=keywords_text,
         articles_text=articles_text,
     )
-    return _call_gemini(prompt) or "오늘의 추천 기사를 준비 중입니다."
+    return _call_llm(prompt) or "오늘의 추천 기사를 준비 중입니다."
 
 
 # ────────────────────────────────────────────────────────────────
@@ -372,7 +386,7 @@ def generate_music_section(music_data: dict, mood_summary: dict) -> str:
         rec_1=rec_1,
         rec_2=rec_2,
     )
-    return _call_gemini(prompt) or f"어제 무드: {mood_ko}\n추천 곡: {rec_1}, {rec_2}"
+    return _call_llm(prompt) or f"어제 무드: {mood_ko}\n추천 곡: {rec_1}, {rec_2}"
 
 
 # ────────────────────────────────────────────────────────────────
