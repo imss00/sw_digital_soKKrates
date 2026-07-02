@@ -400,12 +400,6 @@ def compose_journal(sections: dict) -> dict:
         "schedule": "...",          # 오늘 일정 텍스트
         "keywords": [...],          # 어제 관심 키워드
         "photo_narrative": "...",   # 어제의 한 장면 (있을 때만)
-        "prompt_variants": {        # 디버그용: 이번에 선택된 variant 번호
-            "focus": 0,
-            "reflection": 1,
-            "article": 0,
-            "music": 1,
-        }
     }
     """
     structured = sections.get("structured", {})
