@@ -14,6 +14,7 @@ import faiss
 import numpy as np
 import feedparser
 import requests
+from google import genai
 from sqlalchemy.orm import Session
 
 from backend.models.unified_document import UnifiedDocument
@@ -136,7 +137,7 @@ def analyze_yesterday_mood(user_id: int, target_date: date, db: Session) -> dict
         "avg_valence": avg_valence,
         "avg_energy": avg_energy,
         "top_genre": top_genre,
-        "mood": "bright" if avg_valence and avg_valence > 0.5 else "calm",
+        "mood": "bright" if avg_valence is not None and avg_valence > 0.5 else "calm",
         "track_count": len(records),
     }
 
@@ -144,6 +145,8 @@ def analyze_yesterday_mood(user_id: int, target_date: date, db: Session) -> dict
 # ── 핵심 테마 요약 (역할 B가 core_theme 키로 소비) ─────────────────
 
 DEFAULT_CORE_THEME = "특별한 관심사가 감지되지 않았습니다."
+
+_genai_client = genai.Client()
 
 
 def summarize_core_theme(interest_clusters: list[dict], docs: list) -> str:
@@ -170,9 +173,6 @@ def summarize_core_theme(interest_clusters: list[dict], docs: list) -> str:
 
     # 2) Gemini로 자연스러운 한 줄 테마 생성 (근거 텍스트만 제공 → 날조 방지)
     try:
-        from google import genai
-
-        client = genai.Client()
         joined = "\n".join(f"- {s}" for s in snippets[:15])
         prompt = (
             "다음은 사용자가 하루 동안 남긴 디지털 활동의 대표 조각들입니다.\n"
@@ -180,7 +180,7 @@ def summarize_core_theme(interest_clusters: list[dict], docs: list) -> str:
             "제공된 내용에 없는 사실을 지어내지 말고, 마크다운/따옴표 없이 문장만 출력하세요.\n\n"
             f"{joined}"
         )
-        resp = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+        resp = _genai_client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
         theme = (resp.text or "").strip().strip('"').strip()
         return theme or deterministic
     except Exception:
@@ -201,9 +201,6 @@ def generate_hyde_document(core_theme: str, interest_clusters: list[dict]) -> st
     if not core_theme or core_theme == DEFAULT_CORE_THEME:
         return None
     try:
-        from google import genai
-
-        client = genai.Client()
         cluster_hint = ""
         if interest_clusters:
             tops = []
@@ -218,7 +215,7 @@ def generate_hyde_document(core_theme: str, interest_clusters: list[dict]) -> st
             "마크다운/제목 없이 본문만 출력하세요.\n\n"
             f"핵심 관심사: {core_theme}{cluster_hint}"
         )
-        resp = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+        resp = _genai_client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
         doc = (resp.text or "").strip()
         return doc or None
     except Exception:
