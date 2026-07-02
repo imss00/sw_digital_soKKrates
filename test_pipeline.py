@@ -43,7 +43,7 @@ def run_test():
     print(json.dumps(recommend_res.get("structured", {}), ensure_ascii=False, indent=2))
     print("===============================================================\n")
 
-    print("🚀 [4단계] Gemini 기반 AI 저널 최종 편집...")
+    print("🚀 [4단계] OpenAI 기반 AI 저널 최종 편집...")
     final_journal = run_journal_composition(user_id, target_date, recommend_res, db)
     
     print("\n🎉=================== [최종 생성된 AI 저널] ===================🎉")

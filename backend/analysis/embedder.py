@@ -1,42 +1,57 @@
 
 """
-역할 A — A-1. 임베딩 파이프라인 (Gemini 버전 🚀)
-unified_documents의 content_text를 구글 Gemini 벡터로 변환하고 DB에 저장한다.
+역할 A — A-1. 임베딩 파이프라인 (OpenAI 버전)
+unified_documents의 content_text를 OpenAI 임베딩 벡터로 변환하고 DB에 저장한다.
+
+Gemini 대신 OpenAI를 쓰는 이유:
+- Gemini 무료 한도/계정 정지로 파이프라인이 막히는 문제 회피 (유료 → 정지·한도 리스크 없음)
+- 배포 서버(Fly.io 256MB)에 임베딩 모델을 올리지 않고 API 호출만 함 → 서버 부담 0
+- 생성(recommender)도 OpenAI로 통일 → 키·결제 하나로 관리
 """
 import json
-import os
 from datetime import date, datetime, timedelta, timezone
 
-from google import genai
+from openai import OpenAI
 from sqlalchemy.orm import Session
 
 from backend.models.unified_document import UnifiedDocument
+from backend.config import settings
 
 KST = timezone(timedelta(hours=9))
-# OpenAI 대신 우리가 검증한 최신 Gemini 임베딩 모델 사용
-EMBEDDING_MODEL = "gemini-embedding-001"  
+
+EMBEDDING_MODEL = "text-embedding-3-small"
+EMBEDDING_DIM = 1536
+
+# 클라이언트는 프로세스당 1회만 생성(싱글턴)
+_client = None
+
+
+def _get_client() -> OpenAI:
+    global _client
+    if _client is None:
+        _client = OpenAI(api_key=settings.openai_api_key or None)
+    return _client
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
-    """텍스트 배열을 Gemini API를 호출하여 임베딩 (벡터 좌표로 변환)"""
-    # .env 파일에 있는 GEMINI_API_KEY를 자동으로 읽어와서 작동합니다.
-    client = genai.Client()
-    
-    vectors = []
-    for text in texts:
-        # 텍스트가 비어있지 않은 경우에만 임베딩 수행
-        if text and text.strip():
-            response = client.models.embed_content(
-                model=EMBEDDING_MODEL,
-                contents=text
-            )
-            # 변환된 좌표(float 리스트)를 추출하여 추가
-            vectors.append(response.embeddings[0].values)
-        else:
-            # 빈 텍스트일 경우 더미(0) 벡터 삽입 (에러 방지용)
-            vectors.append([0.0] * 768) 
-            
-    return vectors
+    """텍스트 배열을 OpenAI 임베딩 API로 변환 (벡터 좌표로 변환).
+
+    빈 텍스트는 0 벡터로 채워 인덱스 정렬을 유지한다.
+    비어있지 않은 텍스트만 한 번의 배치 요청으로 임베딩한다.
+    """
+    nonempty_idx = [i for i, t in enumerate(texts) if t and t.strip()]
+    out: list[list[float]] = [[0.0] * EMBEDDING_DIM for _ in texts]
+
+    if nonempty_idx:
+        resp = _get_client().embeddings.create(
+            model=EMBEDDING_MODEL,
+            input=[texts[i] for i in nonempty_idx],
+        )
+        # resp.data 각 항목의 index로 원래 위치에 정확히 매핑
+        for item in resp.data:
+            out[nonempty_idx[item.index]] = item.embedding
+
+    return out
 
 
 def embed_and_store(user_id: int, target_date: date, db: Session) -> dict:
@@ -65,7 +80,7 @@ def embed_and_store(user_id: int, target_date: date, db: Session) -> dict:
     # 2. 가져온 데이터에서 텍스트만 쏙쏙 뽑아내기
     texts = [doc.content_text for doc in docs]
 
-    # 3. Gemini 공장에 넣어서 벡터(좌표)로 변환해 오기
+    # 3. OpenAI 임베딩 API에 넣어서 벡터(좌표)로 변환해 오기
     vectors = embed_texts(texts)
 
     # 4. 변환된 좌표를 다시 DB의 각 줄(row)에 예쁘게 JSON으로 저장하기

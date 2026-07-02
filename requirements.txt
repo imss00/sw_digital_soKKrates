@@ -31,7 +31,7 @@ feedparser==6.0.11
 # AI / Analysis
 anthropic==0.34.0
 google-genai==2.10.0
-openai==1.51.0
+openai==2.44.0  # 1.51.0은 httpx 0.28과 충돌(proxies TypeError) → 호환 버전으로 상향
 scikit-learn==1.5.2
 hdbscan==0.8.40
 faiss-cpu==1.9.0.post1
