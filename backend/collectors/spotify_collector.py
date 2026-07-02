@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 
 import spotipy
@@ -6,6 +7,8 @@ from sqlalchemy.orm import Session
 from backend.models.spotify_history import SpotifyHistory
 from backend.models.user import User
 from backend.config import settings
+
+logger = logging.getLogger(__name__)
 
 # Spotify audio_features가 신규 앱에서 막혀 있어서 장르 기반으로 mood를 추정
 GENRE_MOOD: dict[str, tuple[float, float]] = {
@@ -66,6 +69,10 @@ def _refresh_spotify_token(user: User, db: Session) -> str | None:
     })
 
     if resp.status_code != 200:
+        logger.error(
+            "spotify token refresh failed user_id=%s status=%s body=%s",
+            user.id, resp.status_code, resp.text[:300],
+        )
         return None
 
     tokens = resp.json()
@@ -87,6 +94,7 @@ def collect_spotify(user_id: int, db: Session) -> dict:
 
     access_token = _refresh_spotify_token(user, db)
     if not access_token:
+        logger.error("spotify collection skipped: token refresh failed user_id=%s", user_id)
         return {"status": "error", "reason": "token refresh failed"}
 
     sp = spotipy.Spotify(auth=access_token)
@@ -97,6 +105,7 @@ def collect_spotify(user_id: int, db: Session) -> dict:
             kwargs["after"] = user.spotify_last_cursor_ms
         results = sp.current_user_recently_played(**kwargs)
     except spotipy.exceptions.SpotifyException as e:
+        logger.error("spotify recently_played call failed user_id=%s error=%s", user_id, e)
         return {"status": "error", "reason": str(e)}
 
     items = results.get("items", [])
