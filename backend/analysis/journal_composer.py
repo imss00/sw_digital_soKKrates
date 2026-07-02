@@ -522,7 +522,7 @@ def run_journal_composition(
     music_text = generate_music_section(music_data, mood_summary)
 
     sections = {
-        "date": target_date.strftime("%Y년 %-m월 %-d일"),
+        "date": f"{target_date.year}년 {target_date.month}월 {target_date.day}일",
         "daily_focus": daily_focus,
         "reflection": reflection,
         "photo_narrative": photo_narrative or "",
