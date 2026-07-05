@@ -16,6 +16,7 @@ def _dispose_engine_after_fork(**kwargs):
     engine.dispose()
 
 celery_app.conf.update(
+    imports=("backend.tasks.collection_tasks", "backend.tasks.analysis_tasks"),
     timezone="Asia/Seoul",
     enable_utc=False,
     beat_schedule={
