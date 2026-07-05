@@ -163,7 +163,7 @@ def recommend_articles_multi(
 
 def analyze_yesterday_mood(user_id: int, target_date: date, db: Session) -> dict:
     """어제 Spotify 청취 기록에서 평균 valence/energy + 주요 장르 계산."""
-    day_start = datetime.combine(target_date - timedelta(days=1), datetime.min.time()).replace(tzinfo=KST)
+    day_start = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=KST)
     day_end = day_start + timedelta(days=1)
 
     records = (

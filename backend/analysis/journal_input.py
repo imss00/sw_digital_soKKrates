@@ -268,12 +268,12 @@ def _album_metadata(sp, track: dict) -> dict:
 
 def build_music_section(user_id: int, target_date: date, db: Session, mood_summary: dict) -> dict:
     """
-    yesterday_tracks: 어제(target_date - 1) SpotifyHistory 집계 (재생 횟수 포함).
+    yesterday_tracks: 어제(target_date) SpotifyHistory 집계 (재생 횟수 포함).
     rec_track_1/2: 청취 패턴(top 장르/아티스트)으로 후보를 만들고, 메타데이터는
                    Spotify search + album 엔드포인트로 실값 조회. 토큰/네트워크 실패 시 _available:false.
     rec_reason: valence/energy 대신 장르·아티스트 빈도 요약.
     """
-    yday_start = datetime.combine(target_date - timedelta(days=1), datetime.min.time()).replace(tzinfo=KST)
+    yday_start = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=KST)
     yday_end = yday_start + timedelta(days=1)
 
     records = (
