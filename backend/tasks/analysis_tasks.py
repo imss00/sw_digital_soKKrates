@@ -33,11 +33,13 @@ def run_phase2(user_id: int, target_date_str: str):
 
         analysis_result = run_recommendation(user_id, target_date, db)
 
-        journal_text = run_journal_composition(user_id, target_date, analysis_result, db)
+        journal_result = run_journal_composition(user_id, target_date, analysis_result, db)
 
-        # TODO: Phase 4 — journal_text를 프린터로 전송하거나 저장
+        # TODO: Phase 4 — journal_result를 프린터로 전송하거나 저장
         # from backend.tasks.print_tasks import send_to_printer
-        # send_to_printer.delay(user_id=user_id, journal_text=journal_text)
+        # send_to_printer.delay(user_id=user_id, journal_result=journal_result)
+
+        preview_text = journal_result.get("reflection") or journal_result.get("headline") or ""
 
         return {
             "status": "ok",
@@ -45,7 +47,7 @@ def run_phase2(user_id: int, target_date_str: str):
             "date": target_date_str,
             "embed": embed_result,
             "cluster": cluster_result,
-            "journal_preview": journal_text[:200],
+            "journal_preview": preview_text[:200],
         }
     finally:
         db.close()
