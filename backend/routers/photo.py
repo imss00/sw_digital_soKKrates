@@ -11,6 +11,7 @@ from backend.database import get_db
 from backend.models.photo import Photo
 from backend.models.unified_document import UnifiedDocument
 from backend.collectors.photo_processor import extract_exif, extract_text_vision, is_screenshot
+from backend.utils.pii_mask import mask_pii
 
 router = APIRouter()
 
@@ -66,7 +67,7 @@ async def upload_photos(
                 user_id=user_id,
                 source="photo",
                 source_id=photo.id,
-                content_text=ocr_text[:2000],
+                content_text=mask_pii(ocr_text)[:2000],
                 content_type="screenshot",
                 title=original_name,
                 occurred_at=exif_data.get("taken_at") or now,
