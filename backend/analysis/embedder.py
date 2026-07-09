@@ -62,18 +62,21 @@ def embed_and_store(user_id: int, target_date: date, db: Session) -> dict:
     day_start = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=KST)
     day_end = day_start + timedelta(days=1)
 
-    # 1. DB에서 오늘 치 미처리(임베딩 안 된) 데이터 가져오기
-    docs = (
+    # 1. DB에서 오늘 치 전체 데이터를 먼저 가져와서, "그날 문서가 아예 없음"과
+    #    "이미 다 임베딩됨"을 구분한다 (호출부가 같은 걸 구분하려고 별도 쿼리를 또 만들지 않도록).
+    day_docs = (
         db.query(UnifiedDocument)
         .filter(
             UnifiedDocument.user_id == user_id,
             UnifiedDocument.occurred_at >= day_start,
             UnifiedDocument.occurred_at < day_end,
-            UnifiedDocument.embedding_json.is_(None),  # 아직 임베딩 안 된 것만
         )
         .all()
     )
+    if not day_docs:
+        return {"status": "skip", "reason": "no documents for this day"}
 
+    docs = [d for d in day_docs if d.embedding_json is None]
     if not docs:
         return {"status": "skip", "reason": "no unembedded documents"}
 

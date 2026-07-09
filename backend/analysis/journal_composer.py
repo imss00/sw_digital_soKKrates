@@ -135,8 +135,13 @@ def _pick_variant(variants: list[str]) -> tuple[str, int]:
 
 def extract_keywords(user_id: int, target_date: date, db: Session) -> list[str]:
     """
-    건이(역할 A)가 이미 채워준 keywords 컬럼을 읽어서 합산 반환.
+    건이(역할 A, clusterer.py)가 이미 채워준 keywords 컬럼을 읽어서 합산 반환.
     LLM 호출 없음 — 역할 경계 준수.
+
+    주의: 현재 keywords 컬럼은 진짜 추출된 키워드가 아니라, 관심 주제 군집에 속한
+    문서의 제목/본문 앞부분 미리보기 텍스트다(clusterer.run_clustering 참고). 짧은
+    단어가 아니라 문장 조각일 수 있으니, 이 리스트를 그대로 프롬프트에 verbatim으로
+    끼워넣는 용도로 쓸 땐 그 점을 감안할 것 — 본격적인 LLM 기반 키워드 추출은 아직 없음.
     """
     day_start = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=KST)
     day_end = day_start + timedelta(days=1)

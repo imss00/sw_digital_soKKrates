@@ -6,6 +6,7 @@ from backend.models.youtube_history import YouTubeHistory
 from backend.models.notion_page import NotionPage
 from backend.models.photo import Photo
 from backend.models.unified_document import UnifiedDocument
+from backend.models.journal import Journal
 
 __all__ = [
     "User",
@@ -16,4 +17,5 @@ __all__ = [
     "NotionPage",
     "Photo",
     "UnifiedDocument",
+    "Journal",
 ]
