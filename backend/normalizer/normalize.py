@@ -67,7 +67,10 @@ def normalize_calendar(record: CalendarEvent) -> dict | None:
     content = record.summary or ""
     if record.description:
         content += f": {record.description}"
-    if _should_skip(content):
+    # 짧은 일정명도 그날의 유일한 활동일 수 있다. 일반 웹/문서용 최소 길이 규칙을
+    # 캘린더에 적용하면 "회의", "근무" 같은 유효한 일정만 있는 날은 저널 생성
+    # 대상에서 완전히 빠지므로, 캘린더는 비어 있는 일정만 제외한다.
+    if not content.strip():
         return None
     content = mask_pii(content)
 
