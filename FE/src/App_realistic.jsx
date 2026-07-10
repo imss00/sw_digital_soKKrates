@@ -1,6 +1,12 @@
 import React, { useState, useEffect } from "react";
 import { fetchJournal } from "./api/journal";
-import { initAuthFromUrl, isLoggedIn, mockLogin, logout, getAuthUser } from "./auth";
+import {
+  initAuthFromUrl,
+  isLoggedIn,
+  logout,
+  getAuthUser,
+  startGoogleOAuthLogin,
+} from "./auth";
 
 /* ═════════════════════════════════════════════
    1. 메인 페이지 — 스트라이프 배경 + 빨간 우편함
@@ -456,9 +462,9 @@ function LoginScreen({ onLogin }) {
         </p>
         <button className="login-google-btn" onClick={onLogin}>
           <span className="login-google-icon">G</span>
-          Google로 로그인
+          Google OAuth로 로그인
         </button>
-        <p className="login-hint">(현재는 목업 로그인 — 실제 OAuth 연동 전 단계)</p>
+        <p className="login-hint">저널 수집에 쓰는 계정으로 로그인해야 기록을 볼 수 있습니다.</p>
       </div>
     </div>
   );
@@ -472,6 +478,7 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState(null);
   const [loggedIn, setLoggedIn] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
+  const authUser = getAuthUser();
 
   useEffect(() => {
     initAuthFromUrl(); // 백엔드가 ?token=... 을 붙여 리다이렉트해오면 여기서 저장됨
@@ -486,9 +493,8 @@ export default function App() {
       <>
         <style>{css}</style>
         <LoginScreen
-          onLogin={() => {
-            mockLogin();
-            setLoggedIn(true);
+          onLogin={async () => {
+            await startGoogleOAuthLogin();
           }}
         />
       </>
@@ -498,6 +504,9 @@ export default function App() {
   return (
     <>
       <style>{css}</style>
+      {authUser?.id ? (
+        <div className="auth-badge">로그인됨 · user {authUser.id}</div>
+      ) : null}
       {selectedDate === null ? (
         <MailboxCalendar
           onSelectDate={setSelectedDate}
@@ -812,6 +821,20 @@ body { min-height: 100vh; }
   cursor: pointer;
 }
 .logout-link:hover { color: var(--red-box); }
+.auth-badge {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 10;
+  padding: 8px 12px;
+  border: 1px solid rgba(38, 38, 38, 0.12);
+  border-radius: 999px;
+  background: rgba(250, 248, 243, 0.9);
+  color: #4f473d;
+  font-size: 12px;
+  letter-spacing: 0.2px;
+  backdrop-filter: blur(8px);
+}
 
 /* ═══ 로그인 화면 ═══ */
 .login-bg {

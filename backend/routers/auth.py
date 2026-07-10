@@ -152,6 +152,7 @@ def google_login():
         ),
         "access_type": "offline",
         "prompt": "consent",
+        "state": "web",
     }
     url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params)
     return {"auth_url": url}
@@ -243,6 +244,10 @@ def google_callback(code: str, state: str = "", db: Session = Depends(get_db)):
     if state == "extension":
         token = _issue_jwt(user.id)
         return RedirectResponse(url=f"/auth/extension-done?token={token}")
+
+    if state == "web":
+        token = _issue_jwt(user.id)
+        return RedirectResponse(url=f"/?token={token}")
 
     return {"message": "Google 연동 완료", "user_id": user.id, "email": email}
 

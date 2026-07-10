@@ -6,3 +6,6 @@ __pycache__
 .gitignore
 alembic/versions/__pycache__
 chrome-extension
+FE/node_modules
+FE/.vite
+FE/dist
