@@ -1,4 +1,5 @@
 .env
+SECURITY.md
 __pycache__/
 *.pyc
 .venv/

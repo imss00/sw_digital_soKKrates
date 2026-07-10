@@ -1,7 +1,18 @@
+import logging
 from datetime import date, timedelta
 
 from backend.tasks.celery_app import celery_app
 from backend.database import SessionLocal
+
+logger = logging.getLogger(__name__)
+
+
+def _log_results(task_name: str, results: dict) -> None:
+    errors = {uid: r for uid, r in results.items() if r.get("status") == "error"}
+    if errors:
+        logger.warning("%s: %d/%d users errored -> %s", task_name, len(errors), len(results), errors)
+    else:
+        logger.info("%s: %d users processed -> %s", task_name, len(results), results)
 
 
 @celery_app.task(name="backend.tasks.collection_tasks.collect_daily")
@@ -16,6 +27,7 @@ def collect_daily():
         results = {}
         for user in users:
             results[user.id] = collect_calendar(user_id=user.id, db=db)
+        _log_results("collect_daily", results)
         return results
     finally:
         db.close()
@@ -33,6 +45,7 @@ def collect_spotify_task():
         results = {}
         for user in users:
             results[user.id] = collect_spotify(user_id=user.id, db=db)
+        _log_results("collect_spotify_task", results)
         return results
     finally:
         db.close()

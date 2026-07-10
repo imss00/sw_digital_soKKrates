@@ -10,6 +10,7 @@ from backend.models.youtube_history import YouTubeHistory
 from backend.models.notion_page import NotionPage
 from backend.models.photo import Photo
 from backend.models.unified_document import UnifiedDocument
+from backend.utils.pii_mask import mask_pii
 
 KST = timezone(timedelta(hours=9))
 
@@ -29,6 +30,7 @@ def normalize_chrome(record: BrowsingHistory) -> dict | None:
     content = record.article_text or record.title or ""
     if _should_skip(content):
         return None
+    content = mask_pii(content)
 
     return {
         "source": "chrome",
@@ -47,7 +49,7 @@ def normalize_spotify(record: SpotifyHistory) -> dict | None:
         parts.append(f"앨범: {record.album_name}")
     if genres_str:
         parts.append(f"장르: {genres_str}")
-    content = ". ".join(parts)
+    content = mask_pii(". ".join(parts))
 
     return {
         "source": "spotify",
@@ -67,6 +69,7 @@ def normalize_calendar(record: CalendarEvent) -> dict | None:
         content += f": {record.description}"
     if _should_skip(content):
         return None
+    content = mask_pii(content)
 
     return {
         "source": "calendar",
@@ -86,6 +89,7 @@ def normalize_youtube(record: YouTubeHistory) -> dict | None:
         content += f" Tags: {', '.join(record.tags)}"
     if _should_skip(content):
         return None
+    content = mask_pii(content)
 
     return {
         "source": "youtube",
@@ -100,11 +104,12 @@ def normalize_youtube(record: YouTubeHistory) -> dict | None:
 def normalize_notion(record: NotionPage) -> dict | None:
     if _should_skip(record.content_text):
         return None
+    content = mask_pii(record.content_text)
 
     return {
         "source": "notion",
         "source_id": record.id,
-        "content_text": record.content_text[:2000],
+        "content_text": content[:2000],
         "content_type": "note",
         "title": record.title,
         "occurred_at": record.last_edited,
@@ -123,7 +128,8 @@ def normalize_photo(record: Photo) -> dict | None:
 
     parts = [f"사진 촬영: {record.taken_at}"]
     if record.latitude and record.longitude:
-        parts.append(f"위치: ({record.latitude:.4f}, {record.longitude:.4f})")
+        # 소수점 2자리(~1.1km)로 정밀도를 낮춰 정확한 자택/직장 위치가 드러나지 않게 함
+        parts.append(f"위치: ({record.latitude:.2f}, {record.longitude:.2f})")
     if record.camera_model:
         parts.append(f"카메라: {record.camera_model}")
 

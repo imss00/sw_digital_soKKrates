@@ -56,9 +56,9 @@ content_text  : 분석 대상 텍스트 (최대 2000자)
 occurred_at   : 활동 발생 시각
 mood_valence  : 감정 밝기 (Spotify만, 나머지는 null)
 mood_energy   : 감정 강도 (Spotify만)
-keywords      : ← Phase 2에서 Claude가 채울 칸
+keywords      : ← Phase 2에서 LLM이 채울 칸
 embedding_json: ← Phase 2에서 OpenAI Embeddings가 채울 칸
-cluster_id    : ← Phase 2에서 DBSCAN이 채울 칸
+cluster_id    : ← Phase 2에서 HDBSCAN이 채울 칸
 is_processed  : 처리 완료 시 True로 업데이트
 ```
 
@@ -133,8 +133,6 @@ Chrome과 YouTube는 Extension이 실시간으로 서버에 push합니다.
 
 ---
 
----
-
 ## Phase 2-3 개발 가이드 (팀원용)
 
 뼈대 코드가 `backend/analysis/`에 준비되어 있습니다. 함수 시그니처와 DB 연결은 완성되어 있고, 로직이 필요한 곳에 `TODO` 주석이 달려 있습니다. 그 위에 덮어쓰면 됩니다.
@@ -143,9 +141,9 @@ Chrome과 YouTube는 Extension이 실시간으로 서버에 push합니다.
 
 ```
 backend/analysis/
-  embedder.py        ← 역할 A: Gemini 임베딩 생성 + DB 저장 ✅구현완료
+  embedder.py        ← 역할 A: OpenAI 임베딩 생성 + DB 저장 ✅구현완료
   clusterer.py       ← 역할 A: HDBSCAN 클러스터링 + cluster_id 저장 ✅구현완료
-  recommender.py     ← 역할 A: RSS 수집 + FAISS 유사도 검색 + Spotify 무드 + 구조화 JSON 산출 ✅구현완료
+  recommender.py     ← 역할 A: RSS 수집 + FAISS + HyDE + Spotify 무드 + core_theme + 구조화 JSON ✅구현완료
   journal_input.py   ← 역할 A: 최종 구조화 JSON 어셈블러 (역할 B 입력) ✅구현완료
   journal_composer.py← 역할 B: Gemini 키워드/회고/포커스/기사소개/저널 편집
 
@@ -158,11 +156,11 @@ backend/tasks/
 ```
 (자정) collection_tasks.normalize_and_trigger()
     → analysis_tasks.run_phase2(user_id, date)
-        → embedder.embed_and_store()       # Gemini 임베딩 → embedding_json 저장
+        → embedder.embed_and_store()       # OpenAI 임베딩 → embedding_json 저장
         → clusterer.run_clustering()       # HDBSCAN → cluster_id 저장
-        → recommender.run_recommendation() # RSS(한·영) + FAISS + Spotify 무드
-                                           #   + core_theme + 구조화 JSON("structured") 산출
-        → journal_composer.run_journal_composition()  # Gemini → 저널 텍스트
+        → recommender.run_recommendation() # RSS(한·영) + FAISS + HyDE + Spotify 무드
+                                           #   + core_theme(OpenAI) + 구조화 JSON("structured")
+        → journal_composer.run_journal_composition()  # Gemini → 저널 텍스트 (역할 B, 별도 마이그레이션 예정)
 ```
 
 ### 수동 테스트 방법
@@ -184,7 +182,7 @@ run_phase2(user_id=1, target_date_str="2026-06-27")
 기존 키(`interest_clusters`/`recommended_articles`/`music_recommendation`/`mood_summary`)에 더해
 역할 A가 다음을 채워 넘깁니다.
 
-- **`core_theme`** (str) — 하루를 관통하는 핵심 테마 한 줄. 클러스터/문서 내용을 Gemini로 요약(실패 시 결정적 폴백). 역할 B의 회고·기사소개 재료.
+- **`core_theme`** (str) — 하루를 관통하는 핵심 테마 한 줄. 클러스터/문서 내용을 OpenAI(gpt-4o-mini)로 요약(실패 시 결정적 폴백). 역할 B의 회고·기사소개 재료.
 - **`structured`** (dict) — 역할 A의 최종 구조화 JSON. `journal_input.assemble_journal_input()`이 조립.
 
 ```jsonc
@@ -238,9 +236,16 @@ cp .env.example .env
 | `REDIS_URL` | Upstash → Database → Connect (`rediss://` 형식) |
 | `GOOGLE_CLIENT_ID/SECRET` | console.cloud.google.com |
 | `GOOGLE_API_KEY` | console.cloud.google.com (YouTube Data API v3) |
-| `GEMINI_API_KEY` | aistudio.google.com (임베딩·클러스터 요약·저널 생성에 사용) |
-| `ANTHROPIC_API_KEY` | console.anthropic.com (legacy, 현재 미사용) |
-| `OPENAI_API_KEY` | platform.openai.com (legacy, 현재 미사용) |
+| `OPENAI_API_KEY` | platform.openai.com (**역할 A 임베딩+생성**. text-embedding-3-small · gpt-4o-mini) |
+| `GEMINI_API_KEY` | aistudio.google.com (역할 B journal_composer 저널 생성용. 정지/한도 이슈로 마이그레이션 예정) |
+| `ANTHROPIC_API_KEY` | console.anthropic.com (현재 미사용) |
+
+> **LLM provider 구성 (2026-07 기준)**
+> - **역할 A**(임베딩 + core_theme·HyDE 생성): **OpenAI로 통일** → `OPENAI_API_KEY` 하나면 됨. 유료라 무료한도·정지 이슈 없음, 비용은 하루 몇 번 호출 기준 월 몇 백 원.
+>   - 임베딩: `text-embedding-3-small` (1536차원). 서버에 모델을 안 올리고 API 호출만 → Fly.io 256MB에도 부담 없음.
+>   - 생성: `gpt-4o-mini` (`recommender.GEN_MODEL` 문자열만 바꾸면 다른 모델로 교체 가능).
+> - **역할 B**(journal_composer): 아직 Gemini. 무료 한도/정지 이슈로 팀 별도 마이그레이션 예정.
+> - ⚠️ 임베딩 provider가 바뀌면 벡터 차원도 바뀝니다(Gemini→OpenAI 1536). **과거 다른 provider로 임베딩된 데이터와 섞으면 차원 불일치**가 나니, 새로 테스트할 땐 해당 날짜 `embedding_json`을 비우고(재임베딩) 돌리세요.
 
 ### 2. 패키지 설치
 ```bash

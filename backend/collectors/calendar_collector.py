@@ -1,12 +1,17 @@
+import logging
 from datetime import datetime, timedelta, timezone
 
+from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from sqlalchemy.orm import Session
 
 from backend.config import settings
 from backend.models.calendar_event import CalendarEvent
 from backend.models.user import User
+
+logger = logging.getLogger(__name__)
 
 KST = timezone(timedelta(hours=9))
 
@@ -31,13 +36,17 @@ def collect_calendar(user_id: int, db: Session) -> dict:
     yesterday_start = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     yesterday_end = yesterday_start + timedelta(days=1)
 
-    events_result = service.events().list(
-        calendarId="primary",
-        timeMin=yesterday_start.isoformat(),
-        timeMax=yesterday_end.isoformat(),
-        singleEvents=True,
-        orderBy="startTime",
-    ).execute()
+    try:
+        events_result = service.events().list(
+            calendarId="primary",
+            timeMin=yesterday_start.isoformat(),
+            timeMax=yesterday_end.isoformat(),
+            singleEvents=True,
+            orderBy="startTime",
+        ).execute()
+    except (RefreshError, HttpError) as e:
+        logger.error("calendar collection failed user_id=%s error=%s", user_id, e)
+        return {"status": "error", "reason": str(e)}
 
     inserted = 0
     for event in events_result.get("items", []):

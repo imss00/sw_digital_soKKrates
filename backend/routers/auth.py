@@ -1,11 +1,12 @@
 import base64
 import hashlib
 import os
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 
 import httpx
 import jwt as pyjwt
-import redis as redis_lib
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
@@ -18,6 +19,10 @@ router = APIRouter()
 
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_DAYS = 30
+
+_PKCE_TTL_SECONDS = 600
+_pkce_store: dict[str, tuple[str, float]] = {}
+_pkce_lock = threading.Lock()
 
 
 def _issue_jwt(user_id: int) -> str:
@@ -39,8 +44,21 @@ def decode_jwt(token: str) -> int:
         raise HTTPException(status_code=401, detail="토큰이 유효하지 않습니다.")
 
 
-def _get_redis():
-    return redis_lib.from_url(settings.redis_url, decode_responses=True)
+def _pkce_set(state: str, code_verifier: str) -> None:
+    with _pkce_lock:
+        _pkce_store[state] = (code_verifier, time.time() + _PKCE_TTL_SECONDS)
+
+
+def _pkce_pop(state: str) -> str | None:
+    """state에 대응하는 code_verifier를 1회성으로 꺼낸다. 만료됐으면 None."""
+    with _pkce_lock:
+        entry = _pkce_store.pop(state, None)
+    if entry is None:
+        return None
+    code_verifier, expires_at = entry
+    if time.time() > expires_at:
+        return None
+    return code_verifier
 
 
 def _find_or_create_user(db: Session, email: str, name: str) -> User:
@@ -62,7 +80,7 @@ def spotify_login():
     ).decode().rstrip("=")
     state = base64.urlsafe_b64encode(os.urandom(16)).decode().rstrip("=")
 
-    _get_redis().setex(f"spotify_pkce:{state}", 600, code_verifier)
+    _pkce_set(state, code_verifier)
 
     params = {
         "client_id": settings.spotify_client_id,
@@ -79,11 +97,9 @@ def spotify_login():
 
 @router.get("/spotify/callback")
 def spotify_callback(code: str, state: str = "", db: Session = Depends(get_db)):
-    r = _get_redis()
-    code_verifier = r.get(f"spotify_pkce:{state}")
+    code_verifier = _pkce_pop(state)
     if not code_verifier:
         raise HTTPException(status_code=400, detail="Invalid or expired state — restart OAuth flow")
-    r.delete(f"spotify_pkce:{state}")
 
     resp = httpx.post(
         "https://accounts.spotify.com/api/token",
