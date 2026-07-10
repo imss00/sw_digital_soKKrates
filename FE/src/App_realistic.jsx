@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useLayoutEffect } from "react";
 import { fetchJournal } from "./api/journal";
 import {
   initAuthFromUrl,
@@ -23,6 +23,92 @@ const TIMETABLE_PERIODS = [
   { label: "밤", hours: ["22:00", "23:00", "00:00"] },
 ];
 const TIMETABLE_BLANK_COLS = 6;
+
+/* ═════════════════════════════════════════════
+   재사용 메이슨리(균형 2단) 레이아웃
+   — 각 박스를 실제 칼럼 너비로 먼저 렌더해서 높이를 재고,
+     "지금 더 짧은 열"에 순서대로 넣어 두 열의 높이를 자동으로 맞춘다.
+     기사가 들어오는 배치 우선순위(items 순서)는 유지하면서
+     내용 길이가 매번 달라져도 빈 공간/깨짐 없이 정렬되게 하는 용도.
+═════════════════════════════════════════════ */
+
+function useElementWidth(ref) {
+  const [width, setWidth] = useState(0);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect?.width;
+      if (w) setWidth(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref]);
+  return width;
+}
+
+function MasonryTwoCol({ items, gap = 32, resetKey }) {
+  const containerRef = useRef(null);
+  const measureRefs = useRef({});
+  const width = useElementWidth(containerRef);
+  const [columns, setColumns] = useState(null);
+  const itemsKey = items.map((it) => it.key).join("|");
+  const key = resetKey ?? itemsKey;
+
+  // 날짜 이동 등으로 내용이 바뀌거나(resetKey) 칼럼 너비가 바뀌면 다시 잰다.
+  useEffect(() => {
+    setColumns(null);
+  }, [key, width]);
+
+  // 폰트 로딩이 늦게 끝나 실제 텍스트 높이가 달라질 수 있어 로딩 완료 후 한 번 더 잰다.
+  useEffect(() => {
+    if (!document.fonts?.ready) return;
+    document.fonts.ready.then(() => setColumns(null));
+  }, []);
+
+  useLayoutEffect(() => {
+    if (columns || !width) return;
+    const heights = items.map((it) => measureRefs.current[it.key]?.offsetHeight ?? 0);
+    if (heights.length === 0 || heights.some((h) => !h)) return;
+    const colHeights = [0, 0];
+    const colItems = [[], []];
+    items.forEach((item, i) => {
+      const target = colHeights[0] <= colHeights[1] ? 0 : 1;
+      colItems[target].push(item);
+      colHeights[target] += heights[i] + gap;
+    });
+    setColumns(colItems);
+  });
+
+  const colWidth = width ? (width - gap) / 2 : 0;
+  const display = columns ?? [items, []];
+
+  return (
+    <div className="masonry-wrap" ref={containerRef}>
+      {!columns && colWidth > 0 && (
+        <div className="masonry-measure" style={{ width: colWidth }}>
+          {items.map((item) => (
+            <div key={item.key} ref={(el) => (measureRefs.current[item.key] = el)}>
+              {item.node}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="masonry-2col" style={{ gap }}>
+        {display.map((col, ci) => (
+          <div className="masonry-col" key={ci}>
+            {col.map((item) => (
+              <div className="masonry-item" key={item.key}>
+                {item.node}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function MailboxCalendar({ onSelectDate, onLogout }) {
   const today = new Date();
@@ -168,7 +254,6 @@ function NewspaperPage({ date, onBack }) {
   const sideArticles = journal?.article_intros?.filter((a) => !a.is_main) ?? [];
   const sideArticleLeft = sideArticles[0] ?? null;
   const sideArticleRight = sideArticles[1] ?? null;
-  const topKeywords = journal?.keywords?.slice(0, 5) ?? [];
   const reflectionTags = journal?.reflection
     ? journal.reflection
         .split("/")
@@ -256,161 +341,162 @@ function NewspaperPage({ date, onBack }) {
           )}
         </section>
 
-        <div className="news-grid news-grid-top">
-          <div className="col">
-            <section className="box">
-              <h3 className="label underline">오늘의 일정</h3>
-              <ul className="schedule-list">
-                {scheduleRows.map((item, i) => (
-                  <li key={i}>{item || " "}</li>
-                ))}
-              </ul>
-              <div className="timetable-box">
-                <table className="timetable">
-                  <tbody>
-                    {TIMETABLE_PERIODS.map((period) =>
-                      period.hours.map((hour, hIdx) => (
-                        <tr key={hour}>
-                          {hIdx === 0 && (
-                            <td className="tt-period" rowSpan={period.hours.length}>
-                              {period.label}
-                            </td>
-                          )}
-                          <td className="tt-hour">{hour}</td>
-                          {Array.from({ length: TIMETABLE_BLANK_COLS }).map((_, i) => (
-                            <td className="tt-cell" key={i} />
-                          ))}
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            <section className="box">
-              <h3 className="label">
-                {sideArticleLeft ? sideArticleLeft.title : "사이드 기사"}
-              </h3>
-              {sideArticleLeft ? (
-                <>
-                  <p className="col-text">{sideArticleLeft.intro}</p>
-                  {sideArticleLeft.link && (
+        <MasonryTwoCol
+          resetKey={`${targetDate}-top-${journal ? "loaded" : "loading"}`}
+          items={[
+            {
+              key: "headline",
+              node: (
+                <section className="box box-headline">
+                  <h2 className="headline">
+                    {mainArticle ? mainArticle.title : "Headline of the Day"}
+                  </h2>
+                  <figure className="news-photo">
+                    <div
+                      className="photo-area"
+                      style={{
+                        background: `linear-gradient(150deg,
+                          hsl(${(day * 37) % 360}, 18%, 62%),
+                          hsl(${(day * 37 + 30) % 360}, 22%, 38%))`,
+                      }}
+                    />
+                    <figcaption>
+                      {journal?.photo_narrative ||
+                        "오늘의 대표 사진이 들어갈 자리. 캡션은 두 줄 이내로 짧게 씁니다."}
+                    </figcaption>
+                  </figure>
+                  <p className="col-text">
+                    {mainArticle
+                      ? mainArticle.intro
+                      : "가운데 컬럼은 그날의 가장 큰 사건을 다루는 헤드라인 영역입니다. 사진 한 장과 짧은 기사 — 이것만으로도 하루가 충분히 기록됩니다."}
+                  </p>
+                  {mainArticle?.link && (
                     <a
                       className="source-link"
-                      href={sideArticleLeft.link}
+                      href={mainArticle.link}
                       target="_blank"
                       rel="noreferrer"
                     >
                       원문 보기 ↗
                     </a>
                   )}
-                </>
-              ) : (
-                <p className="col-text">
-                  하루의 전반부 기록이 들어가는 칼럼입니다. 나중에 날짜별
-                  데이터를 연결하면 이 칼럼이 그날의 이야기로 채워집니다.
-                </p>
-              )}
-              <p className="date-stamp">{month + 1}월 {day}일 오전</p>
-            </section>
-          </div>
-
-          <div className="col main-col">
-            <section className="box">
-              <h2 className="headline">
-                {mainArticle ? mainArticle.title : "Headline of the Day"}
-              </h2>
-              <figure className="news-photo">
-                <div
-                  className="photo-area"
-                  style={{
-                    background: `linear-gradient(150deg,
-                      hsl(${(day * 37) % 360}, 18%, 62%),
-                      hsl(${(day * 37 + 30) % 360}, 22%, 38%))`,
-                  }}
-                />
-                <figcaption>
-                  {journal?.photo_narrative ||
-                    "오늘의 대표 사진이 들어갈 자리. 캡션은 두 줄 이내로 짧게 씁니다."}
-                </figcaption>
-              </figure>
-              <p className="col-text">
-                {mainArticle
-                  ? mainArticle.intro
-                  : "가운데 컬럼은 그날의 가장 큰 사건을 다루는 헤드라인 영역입니다. 사진 한 장과 짧은 기사 — 이것만으로도 하루가 충분히 기록됩니다."}
-              </p>
-              {mainArticle?.link && (
-                <a
-                  className="source-link"
-                  href={mainArticle.link}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  원문 보기 ↗
-                </a>
-              )}
-            </section>
-          </div>
-        </div>
+                </section>
+              ),
+            },
+            {
+              key: "schedule",
+              node: (
+                <section className="box">
+                  <h3 className="label underline">오늘의 일정</h3>
+                  <ul className="schedule-list">
+                    {scheduleRows.map((item, i) => (
+                      <li key={i}>{item || " "}</li>
+                    ))}
+                  </ul>
+                  <div className="timetable-box">
+                    <table className="timetable">
+                      <tbody>
+                        {TIMETABLE_PERIODS.map((period) =>
+                          period.hours.map((hour, hIdx) => (
+                            <tr key={hour}>
+                              {hIdx === 0 && (
+                                <td className="tt-period" rowSpan={period.hours.length}>
+                                  {period.label}
+                                </td>
+                              )}
+                              <td className="tt-hour">{hour}</td>
+                              {Array.from({ length: TIMETABLE_BLANK_COLS }).map((_, i) => (
+                                <td className="tt-cell" key={i} />
+                              ))}
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              ),
+            },
+            {
+              key: "side-left",
+              node: (
+                <section className="box">
+                  <h3 className="label">
+                    {sideArticleLeft ? sideArticleLeft.title : "사이드 기사"}
+                  </h3>
+                  {sideArticleLeft ? (
+                    <>
+                      <p className="col-text">{sideArticleLeft.intro}</p>
+                      {sideArticleLeft.link && (
+                        <a
+                          className="source-link"
+                          href={sideArticleLeft.link}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          원문 보기 ↗
+                        </a>
+                      )}
+                    </>
+                  ) : (
+                    <p className="col-text">
+                      하루의 전반부 기록이 들어가는 칼럼입니다. 나중에 날짜별
+                      데이터를 연결하면 이 칼럼이 그날의 이야기로 채워집니다.
+                    </p>
+                  )}
+                  <p className="date-stamp">{month + 1}월 {day}일 오전</p>
+                </section>
+              ),
+            },
+          ]}
+        />
 
         <div className="back-page">
-        <div className="news-grid news-grid-bottom">
-          <div className="col">
-            <section className="box">
-              <h3 className="label">
-                {sideArticleRight ? sideArticleRight.title : "사이드 기사"}
-              </h3>
-              {sideArticleRight ? (
-                <>
-                  <p className="col-text">{sideArticleRight.intro}</p>
-                  {sideArticleRight.link && (
-                    <a
-                      className="source-link"
-                      href={sideArticleRight.link}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      원문 보기 ↗
-                    </a>
+        <MasonryTwoCol
+          resetKey={`${targetDate}-bottom-${journal ? "loaded" : "loading"}`}
+          items={[
+            {
+              key: "side-right",
+              node: (
+                <section className="box">
+                  <h3 className="label">
+                    {sideArticleRight ? sideArticleRight.title : "사이드 기사"}
+                  </h3>
+                  {sideArticleRight ? (
+                    <>
+                      <p className="col-text">{sideArticleRight.intro}</p>
+                      {sideArticleRight.link && (
+                        <a
+                          className="source-link"
+                          href={sideArticleRight.link}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          원문 보기 ↗
+                        </a>
+                      )}
+                    </>
+                  ) : (
+                    <p className="col-text">
+                      하루의 후반부 기록. 저녁에 있었던 일이나 하루를 마치며
+                      든 생각을 적는 칼럼입니다.
+                    </p>
                   )}
-                </>
-              ) : (
-                <p className="col-text">
-                  하루의 후반부 기록. 저녁에 있었던 일이나 하루를 마치며
-                  든 생각을 적는 칼럼입니다.
-                </p>
-              )}
-              <p className="date-stamp">{dateLabel}</p>
-            </section>
-          </div>
-
-          <div className="col">
-            <section className="box">
-              <h3 className="label">관심 키워드 Top 5</h3>
-              {topKeywords.length > 0 ? (
-                <ul className="ranked-list">
-                  {topKeywords.map((kw) => (
-                    <li key={kw}>{kw}</li>
-                  ))}
-                </ul>
-              ) : (
-                <ul className="ranked-list">
-                  <li>첫 번째 항목</li>
-                  <li>두 번째 항목</li>
-                  <li>세 번째 항목</li>
-                  <li>네 번째 항목</li>
-                  <li>다섯 번째 항목</li>
-                </ul>
-              )}
-            </section>
-
-            <section className="box">
-              <h3 className="label">하루다짐</h3>
-              <div className="pledge-box" />
-            </section>
-          </div>
-        </div>
+                  <p className="date-stamp">{dateLabel}</p>
+                </section>
+              ),
+            },
+            {
+              key: "pledge",
+              node: (
+                <section className="box">
+                  <h3 className="label">하루다짐</h3>
+                  <div className="pledge-box" />
+                </section>
+              ),
+            },
+          ]}
+        />
 
         <footer className="news-footer" style={{ marginTop: 8 }}>
           <div className="vinyl">
@@ -1160,22 +1246,41 @@ body { min-height: 100vh; }
   height: 17px;
 }
 
-.news-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  align-items: start;
-  margin-top: 24px;
-}
-.news-grid-top { grid-template-columns: 1fr 1.3fr; }
-.news-grid-bottom { grid-template-columns: 1fr 1fr; }
 .back-page { margin-top: 8px; }
 
-.col { padding: 0 16px; }
-.col:first-child { padding-left: 0; }
-.col:last-child { padding-right: 0; }
+/* 균형 2단 메이슨리 — MasonryTwoCol 컴포넌트가 실제 높이를 재서
+   더 짧은 열에 박스를 넣는 방식. 내용 길이가 매번 달라져도 자동으로 균형 맞음. */
+.masonry-wrap { position: relative; margin-top: 24px; }
+.masonry-measure {
+  position: absolute;
+  top: 0;
+  left: 0;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: -1;
+}
+.masonry-2col {
+  display: flex;
+  align-items: stretch;
+}
+.masonry-col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.masonry-item + .masonry-item { margin-top: 0; }
+/* 짧은 열의 마지막 박스는 테두리를 유지한 채 남는 높이만큼 자연스럽게 늘어나서,
+   테두리 없는 빈 여백이 그대로 드러나지 않게 함 */
+.masonry-item:last-child { flex: 1; display: flex; }
+.masonry-item:last-child > .box {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
 
 .box { border: 1.5px solid var(--rule); padding: 14px 14px 16px; margin-bottom: 18px; }
-.main-col .box { border-width: 2px; }
+.box-headline { border-width: 2px; }
 
 .label {
   font-family: 'Playfair Display', serif;
@@ -1296,9 +1401,8 @@ body { min-height: 100vh; }
 .footer-text { flex: 1; }
 
 @media (max-width: 760px) {
-  .news-grid { grid-template-columns: 1fr; }
-  .col { padding: 0; }
-  .col + .col { padding-top: 18px; }
+  .masonry-2col { flex-direction: column; }
+  .masonry-col + .masonry-col { margin-top: 18px; }
   .paper-sheet { padding: 24px 18px 30px; }
   .news-footer { flex-direction: column; text-align: center; }
   .mail-cabinet { padding: 12px 10px 10px; }
