@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { fetchJournal } from "./api/journal";
+import { initAuthFromUrl, isLoggedIn, mockLogin, logout, getAuthUser } from "./auth";
 
 /* ═════════════════════════════════════════════
    1. 메인 페이지 — 스트라이프 배경 + 빨간 우편함
@@ -17,7 +18,7 @@ const TIMETABLE_PERIODS = [
 ];
 const TIMETABLE_BLANK_COLS = 6;
 
-function MailboxCalendar({ onSelectDate }) {
+function MailboxCalendar({ onSelectDate, onLogout }) {
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
@@ -63,6 +64,8 @@ function MailboxCalendar({ onSelectDate }) {
         <button className="mail-nav" onClick={nextMonth}>▸</button>
       </header>
 
+      <p className="mail-tagline">오늘의 기록이, 내일의 신문이 됩니다</p>
+
       <div className="mail-cabinet">
         <div className="mail-grid weekdays-row">
           {WEEKDAYS.map((w) => (
@@ -103,6 +106,11 @@ function MailboxCalendar({ onSelectDate }) {
       </div>
 
       <p className="mail-hint">우편함을 열어 그날의 신문을 꺼내 보세요</p>
+      {onLogout && (
+        <button className="logout-link" onClick={onLogout}>
+          로그아웃
+        </button>
+      )}
     </div>
   );
 }
@@ -431,17 +439,73 @@ function NewspaperPage({ date, onBack }) {
 }
 
 /* ═════════════════════════════════════════════
+   0. 로그인 화면 (목업)
+   — 실제 Google OAuth가 백엔드에 연결되면 onLogin만 realGoogleLogin으로 교체.
+═════════════════════════════════════════════ */
+
+function LoginScreen({ onLogin }) {
+  return (
+    <div className="login-bg">
+      <div className="login-card">
+        <p className="login-kicker">PAPERBACK AGENT</p>
+        <h1 className="login-title">우편함 열쇠가 필요해요</h1>
+        <p className="login-desc">
+          Google 계정으로 한 번만 로그인하면,
+          <br />
+          다음부터는 자동으로 우편함이 열립니다.
+        </p>
+        <button className="login-google-btn" onClick={onLogin}>
+          <span className="login-google-icon">G</span>
+          Google로 로그인
+        </button>
+        <p className="login-hint">(현재는 목업 로그인 — 실제 OAuth 연동 전 단계)</p>
+      </div>
+    </div>
+  );
+}
+
+/* ═════════════════════════════════════════════
    앱 루트
 ═════════════════════════════════════════════ */
 
 export default function App() {
   const [selectedDate, setSelectedDate] = useState(null);
+  const [loggedIn, setLoggedIn] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
+
+  useEffect(() => {
+    initAuthFromUrl(); // 백엔드가 ?token=... 을 붙여 리다이렉트해오면 여기서 저장됨
+    setLoggedIn(isLoggedIn());
+    setAuthChecked(true);
+  }, []);
+
+  if (!authChecked) return null;
+
+  if (!loggedIn) {
+    return (
+      <>
+        <style>{css}</style>
+        <LoginScreen
+          onLogin={() => {
+            mockLogin();
+            setLoggedIn(true);
+          }}
+        />
+      </>
+    );
+  }
 
   return (
     <>
       <style>{css}</style>
       {selectedDate === null ? (
-        <MailboxCalendar onSelectDate={setSelectedDate} />
+        <MailboxCalendar
+          onSelectDate={setSelectedDate}
+          onLogout={() => {
+            logout();
+            setLoggedIn(false);
+          }}
+        />
       ) : (
         <NewspaperPage date={selectedDate} onBack={() => setSelectedDate(null)} />
       )}
@@ -544,6 +608,16 @@ body { min-height: 100vh; }
   box-shadow: 0 1px 2px rgba(0,0,0,0.15);
 }
 .mail-nav:hover { border-color: var(--red-box); color: var(--red-box); }
+
+.mail-tagline {
+  font-family: 'Nanum Myeongjo', serif;
+  font-style: italic;
+  font-size: 14px;
+  letter-spacing: 1px;
+  color: #8c8578;
+  margin: -10px 0 26px;
+  text-align: center;
+}
 
 /* ═══ 빨간 우편함 캐비닛 ═══ */
 .mail-cabinet {
@@ -725,6 +799,101 @@ body { min-height: 100vh; }
   color: #7d786f;
   font-size: 13px;
   letter-spacing: 2px;
+}
+.logout-link {
+  margin-top: 10px;
+  background: none;
+  border: none;
+  color: #a49c8b;
+  font-size: 12px;
+  letter-spacing: 1px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.logout-link:hover { color: var(--red-box); }
+
+/* ═══ 로그인 화면 ═══ */
+.login-bg {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #f2ede4;
+  background-image: ${BRICK};
+  background-size: 80px 40px;
+  padding: 20px;
+  font-family: 'Noto Sans KR', sans-serif;
+}
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  background: #fdfcfa;
+  border: 1px solid #d8d2c4;
+  border-radius: 6px;
+  padding: 40px 32px 32px;
+  text-align: center;
+  box-shadow:
+    0 24px 44px rgba(50, 15, 15, 0.18),
+    0 6px 12px rgba(0,0,0,0.08);
+}
+.login-kicker {
+  font-size: 11px;
+  letter-spacing: 4px;
+  color: var(--red-box);
+  font-weight: 700;
+  margin-bottom: 14px;
+}
+.login-title {
+  font-family: 'Nanum Myeongjo', serif;
+  font-size: 22px;
+  font-weight: 800;
+  color: #211c14;
+  margin-bottom: 14px;
+}
+.login-desc {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #5c574c;
+  margin-bottom: 26px;
+}
+.login-google-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 16px;
+  font-family: 'Noto Sans KR', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  color: #262626;
+  background: #fff;
+  border: 1px solid #c7c1b4;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: box-shadow 0.12s, border-color 0.12s;
+}
+.login-google-btn:hover {
+  border-color: var(--red-box);
+  box-shadow: 0 2px 8px rgba(190, 15, 36, 0.15);
+}
+.login-google-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--red-box);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+.login-hint {
+  margin-top: 18px;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  color: #b0aa9c;
 }
 
 /* ═══ 신문 페이지 ═══ */

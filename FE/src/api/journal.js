@@ -5,11 +5,13 @@
 // (참고: repo README / backend/models/journal.py)
 
 import { MOCK_JOURNAL_BY_DATE } from "./mockJournal";
+import { getAuthHeaderIfReal } from "../auth";
 
 const API_BASE = "https://paperback-agent.fly.dev";
 
-// TODO: 로그인(Google OAuth) 붙으면 user_id 쿼리 대신
-// Authorization: Bearer <JWT> 헤더 방식으로 교체.
+// 로그인(Google OAuth)이 실제로 붙으면 auth.js에 저장된 진짜 JWT가
+// getAuthHeaderIfReal()을 통해 Authorization 헤더로 자동 적용된다.
+// 아직 목업 로그인 단계라 헤더가 없을 땐 기존처럼 DEV_USER_ID로 폴백.
 // DB에서 확인된 실제 저널 행: user_id=3, target_date=2026-07-08.
 const DEV_USER_ID = 3;
 
@@ -29,9 +31,12 @@ export async function fetchJournal(targetDate) {
     return MOCK_JOURNAL_BY_DATE[targetDate] ?? null;
   }
 
-  const res = await fetch(
-    `${API_BASE}/journal/${targetDate}?user_id=${DEV_USER_ID}`
-  );
+  const authHeader = getAuthHeaderIfReal();
+  const url = authHeader
+    ? `${API_BASE}/journal/${targetDate}`
+    : `${API_BASE}/journal/${targetDate}?user_id=${DEV_USER_ID}`;
+
+  const res = await fetch(url, { headers: authHeader ?? {} });
 
   if (res.status === 404) {
     return null; // 그 날짜엔 아직 생성된 저널이 없음
