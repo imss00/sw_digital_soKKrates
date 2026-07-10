@@ -1,0 +1,11 @@
+/* index.html의 body에 있던 Tailwind 클래스(min-h-screen bg-zinc-950 text-white antialiased)를
+   그대로 옮긴 순수 CSS. Tailwind 자체는 Node 20+ 요구(현재 환경 Node 18)라서 뺐음. */
+html, body {
+  min-height: 100vh;
+}
+body {
+  background-color: #09090b;
+  color: #ffffff;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}

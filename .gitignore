@@ -10,3 +10,4 @@ uploads/takeout/*
 *.egg-info/
 dist/
 build/
+.DS_Store
