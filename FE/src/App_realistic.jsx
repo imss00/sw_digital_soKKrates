@@ -461,7 +461,7 @@ function NewspaperPage({ date, onBack }) {
         </section>
 
         <MasonryTwoCol
-          resetKey={`${targetDate}-top-${journal ? "loaded" : "loading"}`}
+          resetKey={`${targetDate}-top-${journal ? "loaded" : "loading"}-${photoObjectUrl ? "photo" : "placeholder"}`}
           items={[
             {
               key: "headline",
