@@ -1,0 +1,101 @@
+import asyncio
+from io import BytesIO
+from types import SimpleNamespace
+from unittest import TestCase
+from unittest.mock import patch
+
+from fastapi import HTTPException
+from PIL import Image
+
+from backend.routers import photo
+
+
+def _png_bytes() -> bytes:
+    buf = BytesIO()
+    Image.new("RGB", (4, 4), color="white").save(buf, format="PNG")
+    return buf.getvalue()
+
+
+class FakeQuery:
+    def __init__(self, existing=None):
+        self.existing = existing
+
+    def filter(self, *_args, **_kwargs):
+        return self
+
+    def first(self):
+        return self.existing
+
+
+class FakeSession:
+    def __init__(self, existing=None):
+        self.existing = existing
+        self.added = []
+        self.committed = False
+        self.flushed = False
+
+    def query(self, *_args, **_kwargs):
+        return FakeQuery(self.existing)
+
+    def add(self, item):
+        self.added.append(item)
+
+    def flush(self):
+        self.flushed = True
+        for item in self.added:
+            if getattr(item, "id", None) is None:
+                item.id = 123
+
+    def commit(self):
+        self.committed = True
+
+
+class FakeUpload:
+    def __init__(self, filename: str, content_type: str, content: bytes):
+        self.filename = filename
+        self.content_type = content_type
+        self._content = content
+
+    async def read(self):
+        return self._content
+
+
+class PhotoUploadTest(TestCase):
+    def test_requires_bearer_token(self):
+        with self.assertRaises(HTTPException) as ctx:
+            photo._resolve_user_id(None)
+
+        self.assertEqual(ctx.exception.status_code, 401)
+
+    def test_rejects_non_image_content_type(self):
+        with self.assertRaises(HTTPException) as ctx:
+            photo._validate_file("note.txt", "text/plain", b"hello")
+
+        self.assertEqual(ctx.exception.status_code, 415)
+
+    def test_upload_uses_jwt_user_id(self):
+        upload = FakeUpload("shot.png", "image/png", _png_bytes())
+        db = FakeSession()
+
+        with patch("backend.routers.photo.decode_jwt", return_value=42), patch(
+            "backend.routers.photo.extract_exif",
+            return_value={"taken_at": None, "latitude": None, "longitude": None, "camera_model": None},
+        ), patch("backend.routers.photo.is_screenshot", return_value=False):
+            result = asyncio.run(photo.upload_photos([upload], authorization="Bearer token", db=db))
+
+        self.assertEqual(result["uploaded"], 1)
+        self.assertTrue(db.committed)
+        saved_photo = next(item for item in db.added if isinstance(item, photo.Photo))
+        self.assertEqual(saved_photo.user_id, 42)
+
+    def test_duplicate_is_scoped_to_jwt_user_id(self):
+        existing = SimpleNamespace(id=77)
+        upload = FakeUpload("dup.png", "image/png", _png_bytes())
+        db = FakeSession(existing=existing)
+
+        with patch("backend.routers.photo.decode_jwt", return_value=42):
+            result = asyncio.run(photo.upload_photos([upload], authorization="Bearer token", db=db))
+
+        self.assertEqual(result["results"][0]["duplicate"], True)
+        self.assertEqual(result["results"][0]["photo_id"], 77)
+        self.assertEqual(db.added, [])

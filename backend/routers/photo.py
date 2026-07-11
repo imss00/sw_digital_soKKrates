@@ -3,7 +3,7 @@ import io
 import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, UploadFile, File, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, UploadFile, File
 from PIL import Image
 from sqlalchemy.orm import Session
 
@@ -12,15 +12,45 @@ from backend.database import get_db
 from backend.models.photo import Photo
 from backend.models.unified_document import UnifiedDocument
 from backend.collectors.photo_processor import extract_exif, extract_text_vision, is_screenshot
+from backend.routers.auth import decode_jwt
 from backend.utils.pii_mask import mask_pii
 
 router = APIRouter()
+
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+MAX_FILES_PER_UPLOAD = 20
+MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
+MAX_TOTAL_UPLOAD_BYTES = 80 * 1024 * 1024
+
+
+def _resolve_user_id(authorization: str | None) -> int:
+    if authorization and authorization.startswith("Bearer "):
+        return decode_jwt(authorization.removeprefix("Bearer "))
+    raise HTTPException(status_code=401, detail="인증 필요: Authorization 헤더가 필요합니다")
+
+
+def _validate_file(original_name: str, content_type: str | None, content: bytes) -> None:
+    if content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported image type for {original_name}: {content_type or 'unknown'}",
+        )
+    if not content:
+        raise HTTPException(status_code=400, detail=f"Empty file: {original_name}")
+    if len(content) > MAX_FILE_SIZE_BYTES:
+        raise HTTPException(status_code=413, detail=f"File too large: {original_name}")
+
+    try:
+        with Image.open(io.BytesIO(content)) as img:
+            img.verify()
+    except Exception:
+        raise HTTPException(status_code=400, detail=f"Invalid image file: {original_name}")
 
 
 @router.post("/upload")
 async def upload_photos(
     files: list[UploadFile] = File(...),
-    user_id: int = Query(..., description="업로드할 유저 ID"),
+    authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ):
     """사진 업로드 + EXIF 파싱. 파일은 디스크에 저장하지 않고 메모리에서 처리.
@@ -29,10 +59,19 @@ async def upload_photos(
     content_hash로 감지해서 EXIF/OCR 재처리 없이 건너뛴다 — 프론트가 "마지막
     동기화 이후"를 추적하지 못해도 서버 쪽에서 안전하게 중복을 막는다.
     """
+    user_id = _resolve_user_id(authorization)
+    if len(files) > MAX_FILES_PER_UPLOAD:
+        raise HTTPException(status_code=413, detail="Too many files in one upload")
+
     results = []
+    total_size = 0
     for file in files:
         original_name = file.filename or "unknown.jpg"
         content = await file.read()
+        _validate_file(original_name, file.content_type, content)
+        total_size += len(content)
+        if total_size > MAX_TOTAL_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="Upload batch too large")
         content_hash = hashlib.sha256(content).hexdigest()
 
         existing = (

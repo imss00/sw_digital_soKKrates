@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from "react";
 import { fetchJournal } from "./api/journal";
+import { PHOTO_LIMITS, uploadPhotos } from "./api/photos";
 import {
   initAuthFromUrl,
   isLoggedIn,
@@ -110,6 +111,98 @@ function MasonryTwoCol({ items, gap = 32, resetKey }) {
   );
 }
 
+function formatBytes(bytes) {
+  if (!bytes) return "0MB";
+  return `${(bytes / 1024 / 1024).toFixed(bytes >= 1024 * 1024 ? 1 : 2)}MB`;
+}
+
+function MailboxPhotoDrop() {
+  const inputRef = useRef(null);
+  const [files, setFiles] = useState([]);
+  const [status, setStatus] = useState("idle");
+  const [message, setMessage] = useState("");
+
+  const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+
+  const chooseFiles = (event) => {
+    const selected = Array.from(event.target.files ?? []);
+    setStatus("idle");
+    setMessage("");
+
+    if (selected.length > PHOTO_LIMITS.maxFiles) {
+      setFiles([]);
+      setMessage(`한 번에 ${PHOTO_LIMITS.maxFiles}장까지만 투고할 수 있어요.`);
+      return;
+    }
+    const oversized = selected.find((file) => file.size > PHOTO_LIMITS.maxFileSize);
+    if (oversized) {
+      setFiles([]);
+      setMessage(`${oversized.name} 파일이 ${formatBytes(PHOTO_LIMITS.maxFileSize)}를 넘어요.`);
+      return;
+    }
+    const selectedTotal = selected.reduce((sum, file) => sum + file.size, 0);
+    if (selectedTotal > PHOTO_LIMITS.maxTotalSize) {
+      setFiles([]);
+      setMessage(`총 용량은 ${formatBytes(PHOTO_LIMITS.maxTotalSize)}까지만 가능해요.`);
+      return;
+    }
+    setFiles(selected);
+  };
+
+  const submit = async () => {
+    if (!files.length || status === "uploading") return;
+    setStatus("uploading");
+    setMessage("투고 중입니다...");
+    try {
+      const result = await uploadPhotos(files);
+      const duplicates = result.results?.filter((item) => item.duplicate).length ?? 0;
+      const accepted = (result.results?.length ?? 0) - duplicates;
+      setStatus("done");
+      setMessage(`투고 완료: 새 사진 ${accepted}장${duplicates ? `, 중복 ${duplicates}장` : ""}`);
+      setFiles([]);
+      if (inputRef.current) inputRef.current.value = "";
+    } catch (error) {
+      setStatus("error");
+      setMessage(error.message || "업로드 실패. 다시 시도해주세요.");
+    }
+  };
+
+  return (
+    <section className="photo-drop">
+      <div className="photo-drop-copy">
+        <p className="photo-drop-kicker">TOMORROW EDITION</p>
+        <h2>내일 조간 투고함</h2>
+        <p>오늘의 사진과 스크린샷을 맡겨두면 내일 아침 신문에 반영됩니다.</p>
+      </div>
+
+      <div className="photo-drop-controls">
+        <input
+          ref={inputRef}
+          className="photo-file-input"
+          type="file"
+          accept={PHOTO_LIMITS.accept}
+          multiple
+          onChange={chooseFiles}
+        />
+        <button
+          className="photo-submit"
+          type="button"
+          disabled={!files.length || status === "uploading"}
+          onClick={submit}
+        >
+          {status === "uploading" ? "투고 중" : "투고하기"}
+        </button>
+      </div>
+
+      <div className="photo-drop-meta">
+        <span>{files.length ? `${files.length}장 선택` : "사진을 선택하세요"}</span>
+        <span>{formatBytes(totalSize)}</span>
+      </div>
+      {message && <p className={`photo-drop-message ${status}`}>{message}</p>}
+    </section>
+  );
+}
+
 function MailboxCalendar({ onSelectDate, onLogout }) {
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
@@ -197,6 +290,7 @@ function MailboxCalendar({ onSelectDate, onLogout }) {
       </div>
 
       <p className="mail-hint">우편함을 열어 그날의 신문을 꺼내 보세요</p>
+      <MailboxPhotoDrop />
       {onLogout && (
         <button className="logout-link" onClick={onLogout}>
           로그아웃
@@ -894,6 +988,82 @@ body { min-height: 100vh; }
   font-size: 13px;
   letter-spacing: 2px;
 }
+.photo-drop {
+  width: 100%;
+  max-width: 700px;
+  margin-top: 24px;
+  padding: 18px 18px 16px;
+  border: 1px solid #d8d2c4;
+  background: rgba(253,252,250,0.9);
+  box-shadow: 0 8px 20px rgba(50,15,15,0.08);
+}
+.photo-drop-copy {
+  text-align: left;
+}
+.photo-drop-kicker {
+  margin-bottom: 6px;
+  color: var(--red-box);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 3px;
+}
+.photo-drop h2 {
+  font-family: 'Nanum Myeongjo', serif;
+  font-size: 20px;
+  font-weight: 800;
+  color: #211c14;
+  margin-bottom: 8px;
+}
+.photo-drop-copy p:last-child {
+  color: #5c574c;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.photo-drop-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+}
+.photo-file-input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid #c7c1b4;
+  background: #fff;
+  color: #3c352c;
+  font-size: 12px;
+}
+.photo-submit {
+  min-width: 92px;
+  padding: 10px 14px;
+  border: none;
+  background: var(--ink);
+  color: var(--cream);
+  font-size: 12px;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+.photo-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.photo-drop-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 9px;
+  color: #8c8578;
+  font-size: 11px;
+}
+.photo-drop-message {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #5c574c;
+}
+.photo-drop-message.done { color: #356847; }
+.photo-drop-message.error { color: var(--red-box); }
 .logout-link {
   margin-top: 10px;
   background: none;
@@ -1405,6 +1575,8 @@ body { min-height: 100vh; }
   .paper-sheet { padding: 24px 18px 30px; }
   .news-footer { flex-direction: column; text-align: center; }
   .mail-cabinet { padding: 12px 10px 10px; }
+  .photo-drop-controls { flex-direction: column; align-items: stretch; }
+  .photo-submit { width: 100%; }
 }
 
 /* ═══ 인쇄용 (A4 양면 — 앞면: 마스트헤드~헤드라인 기사, 뒷면: back-page) ═══ */
