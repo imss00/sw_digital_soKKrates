@@ -653,7 +653,10 @@ function NewspaperPage({ date, onBack }) {
         </div>
       </div>
 
-      <button className="back-btn" onClick={onBack}>← 우편함으로</button>
+      <div className="page-actions">
+        <button className="back-btn" onClick={onBack}>← 우편함으로</button>
+        <button className="print-btn" onClick={() => window.print()}>🖨 인쇄하기</button>
+      </div>
     </div>
   );
 }
@@ -1230,9 +1233,15 @@ body { min-height: 100vh; }
 }
 .news-bg > * { position: relative; z-index: 4; }
 
-.back-btn {
-  display: block;
+.page-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
   margin: 24px auto 0;
+}
+.back-btn,
+.print-btn {
+  display: block;
   font-family: 'Noto Sans KR', sans-serif;
   font-size: 13px;
   letter-spacing: 1px;
@@ -1243,7 +1252,9 @@ body { min-height: 100vh; }
   cursor: pointer;
   z-index: 10;
 }
-.back-btn:hover { background: #322c22; }
+.back-btn:hover, .print-btn:hover { background: #322c22; }
+.print-btn { background: var(--red-box); }
+.print-btn:hover { background: var(--red-deep); }
 
 .paper-sheet {
   position: relative;
@@ -1636,7 +1647,7 @@ body { min-height: 100vh; }
     display: none !important;
   }
 
-  .back-btn { display: none !important; }
+  .page-actions { display: none !important; }
 
   .news-bg {
     background: none !important;
