@@ -87,6 +87,12 @@ class PhotoUploadTest(TestCase):
         self.assertTrue(db.committed)
         saved_photo = next(item for item in db.added if isinstance(item, photo.Photo))
         self.assertEqual(saved_photo.user_id, 42)
+        saved_doc = next(item for item in db.added if isinstance(item, photo.UnifiedDocument))
+        self.assertEqual(saved_doc.user_id, 42)
+        self.assertEqual(saved_doc.source, "photo")
+        self.assertEqual(saved_doc.source_id, saved_photo.id)
+        self.assertEqual(saved_doc.content_type, "photo")
+        self.assertIn("사진 업로드: shot.png", saved_doc.content_text)
 
     def test_duplicate_is_scoped_to_jwt_user_id(self):
         existing = SimpleNamespace(id=77)

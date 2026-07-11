@@ -47,6 +47,17 @@ def _validate_file(original_name: str, content_type: str | None, content: bytes)
         raise HTTPException(status_code=400, detail=f"Invalid image file: {original_name}")
 
 
+def _build_photo_content(original_name: str, exif_data: dict, width: int | None, height: int | None) -> str:
+    parts = [f"사진 업로드: {original_name}"]
+    if exif_data.get("camera_model"):
+        parts.append(f"카메라: {exif_data['camera_model']}")
+    if width and height:
+        parts.append(f"크기: {width}x{height}")
+    if exif_data.get("latitude") is not None and exif_data.get("longitude") is not None:
+        parts.append(f"위치: {exif_data['latitude']:.6f}, {exif_data['longitude']:.6f}")
+    return "\n".join(parts)
+
+
 @router.post("/upload")
 async def upload_photos(
     files: list[UploadFile] = File(...),
@@ -122,17 +133,22 @@ async def upload_photos(
         db.add(photo)
         db.flush()
 
-        if ocr_text:
-            doc = UnifiedDocument(
-                user_id=user_id,
-                source="photo",
-                source_id=photo.id,
-                content_text=mask_pii(ocr_text)[:2000],
-                content_type="screenshot",
-                title=original_name,
-                occurred_at=exif_data.get("taken_at") or now,
-            )
-            db.add(doc)
+        doc_content = mask_pii(ocr_text)[:2000] if ocr_text else _build_photo_content(
+            original_name,
+            exif_data,
+            width,
+            height,
+        )
+        doc = UnifiedDocument(
+            user_id=user_id,
+            source="photo",
+            source_id=photo.id,
+            content_text=doc_content,
+            content_type="screenshot" if screenshot else "photo",
+            title=original_name if screenshot else f"사진 {original_name}",
+            occurred_at=exif_data.get("taken_at") or now,
+        )
+        db.add(doc)
 
         results.append({
             "filename": original_name,
