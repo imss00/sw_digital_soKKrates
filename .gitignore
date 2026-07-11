@@ -4,6 +4,7 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+FE/node_modules/
 uploads/photos/*
 uploads/takeout/*
 !uploads/photos/.gitkeep

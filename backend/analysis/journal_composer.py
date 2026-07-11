@@ -667,7 +667,7 @@ def run_journal_composition(
     photo_section = structured.get("photo", {})
     if photo_section.get("_available"):
         photo_narrative = generate_photo_narrative(
-            analysis_result.get("photo_labels", [])
+            photo_section.get("photo_labels") or analysis_result.get("photo_labels", [])
         )
     else:
         photo_narrative = None

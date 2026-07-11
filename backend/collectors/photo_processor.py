@@ -6,6 +6,34 @@ from PIL import Image
 from PIL.ExifTags import TAGS, GPSTAGS
 
 KST = timezone(timedelta(hours=9))
+MIN_LABEL_SCORE = 0.65
+GENERIC_LABELS = {
+    "adaptation",
+    "atmosphere",
+    "black",
+    "blue",
+    "darkness",
+    "event",
+    "font",
+    "fun",
+    "happy",
+    "human",
+    "image",
+    "line",
+    "material property",
+    "mode of transport",
+    "natural environment",
+    "organism",
+    "people",
+    "person",
+    "photograph",
+    "rectangle",
+    "snapshot",
+    "sky",
+    "text",
+    "white",
+    "world",
+}
 
 
 def _convert_gps_to_decimal(gps_coords, gps_ref) -> float | None:
@@ -22,14 +50,17 @@ def _convert_gps_to_decimal(gps_coords, gps_ref) -> float | None:
         return None
 
 
-async def extract_text_vision(image_bytes: bytes, api_key: str) -> str | None:
-    """Google Vision API TEXT_DETECTION으로 이미지에서 텍스트 추출"""
+async def analyze_image_vision(image_bytes: bytes, api_key: str) -> dict:
+    """Google Vision API로 OCR 텍스트와 장면 라벨을 함께 추출한다."""
     image_b64 = base64.b64encode(image_bytes).decode()
 
     payload = {
         "requests": [{
             "image": {"content": image_b64},
-            "features": [{"type": "TEXT_DETECTION", "maxResults": 1}],
+            "features": [
+                {"type": "TEXT_DETECTION", "maxResults": 1},
+                {"type": "LABEL_DETECTION", "maxResults": 8},
+            ],
         }]
     }
 
@@ -40,14 +71,43 @@ async def extract_text_vision(image_bytes: bytes, api_key: str) -> str | None:
         )
 
     if resp.status_code != 200:
-        return None
+        return {"ocr_text": None, "labels": []}
 
     responses = resp.json().get("responses", [])
     if not responses:
-        return None
+        return {"ocr_text": None, "labels": []}
 
-    text = responses[0].get("fullTextAnnotation", {}).get("text", "")
-    return text.strip() or None
+    first = responses[0]
+    text = first.get("fullTextAnnotation", {}).get("text", "")
+    labels = filter_scene_labels(first.get("labelAnnotations", []))
+    return {"ocr_text": text.strip() or None, "labels": labels}
+
+
+async def extract_text_vision(image_bytes: bytes, api_key: str) -> str | None:
+    """Google Vision API TEXT_DETECTION으로 이미지에서 텍스트 추출."""
+    result = await analyze_image_vision(image_bytes, api_key)
+    return result["ocr_text"]
+
+
+def filter_scene_labels(raw_labels: list[dict], *, limit: int = 8) -> list[dict]:
+    """Vision 라벨 중 저널 장면 설명에 쓸 만한 항목만 남긴다."""
+    filtered: list[dict] = []
+    seen: set[str] = set()
+    for item in raw_labels:
+        description = (item.get("description") or "").strip()
+        if not description:
+            continue
+        key = description.lower()
+        if key in seen or key in GENERIC_LABELS:
+            continue
+        score = item.get("score")
+        if score is not None and score < MIN_LABEL_SCORE:
+            continue
+        filtered.append({"description": description, "score": score})
+        seen.add(key)
+        if len(filtered) >= limit:
+            break
+    return filtered
 
 
 def is_screenshot(filename: str, exif_data: dict) -> bool:

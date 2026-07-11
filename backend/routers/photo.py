@@ -11,7 +11,7 @@ from backend.config import settings
 from backend.database import get_db
 from backend.models.photo import Photo
 from backend.models.unified_document import UnifiedDocument
-from backend.collectors.photo_processor import extract_exif, extract_text_vision, is_screenshot
+from backend.collectors.photo_processor import analyze_image_vision, extract_exif, is_screenshot
 from backend.routers.auth import decode_jwt
 from backend.utils.pii_mask import mask_pii
 
@@ -47,8 +47,20 @@ def _validate_file(original_name: str, content_type: str | None, content: bytes)
         raise HTTPException(status_code=400, detail=f"Invalid image file: {original_name}")
 
 
-def _build_photo_content(original_name: str, exif_data: dict, width: int | None, height: int | None) -> str:
+def _build_photo_content(
+    original_name: str,
+    exif_data: dict,
+    width: int | None,
+    height: int | None,
+    labels: list[dict] | None = None,
+    ocr_text: str | None = None,
+) -> str:
     parts = [f"사진 업로드: {original_name}"]
+    label_names = [label["description"] for label in labels or [] if label.get("description")]
+    if label_names:
+        parts.append(f"장면 키워드: {', '.join(label_names[:8])}")
+    if ocr_text:
+        parts.append(f"OCR 텍스트: {mask_pii(ocr_text)[:1200]}")
     if exif_data.get("camera_model"):
         parts.append(f"카메라: {exif_data['camera_model']}")
     if width and height:
@@ -113,13 +125,15 @@ async def upload_photos(
         except Exception:
             pass
 
-        ocr_text = None
+        vision_result = {"ocr_text": None, "labels": []}
         screenshot = is_screenshot(original_name, exif_data)
-        if screenshot and settings.google_api_key:
+        if settings.google_api_key:
             try:
-                ocr_text = await extract_text_vision(content, settings.google_api_key)
+                vision_result = await analyze_image_vision(content, settings.google_api_key)
             except Exception:
-                ocr_text = None
+                vision_result = {"ocr_text": None, "labels": []}
+        ocr_text = vision_result.get("ocr_text")
+        labels = vision_result.get("labels") or []
 
         now = datetime.now(timezone.utc)
         photo = Photo(
@@ -136,16 +150,21 @@ async def upload_photos(
             file_size=len(content),
             width=width,
             height=height,
-            vision_labels=json.dumps({"ocr_text": ocr_text}, ensure_ascii=False) if ocr_text else None,
+            vision_labels=json.dumps(
+                {"ocr_text": ocr_text, "labels": labels},
+                ensure_ascii=False,
+            ) if ocr_text or labels else None,
         )
         db.add(photo)
         db.flush()
 
-        doc_content = mask_pii(ocr_text)[:2000] if ocr_text else _build_photo_content(
+        doc_content = _build_photo_content(
             original_name,
             exif_data,
             width,
             height,
+            labels=labels,
+            ocr_text=ocr_text,
         )
         doc = UnifiedDocument(
             user_id=user_id,
@@ -165,6 +184,7 @@ async def upload_photos(
             "exif": exif_data,
             "screenshot": screenshot,
             "ocr_text": ocr_text,
+            "labels": labels,
         })
 
     db.commit()

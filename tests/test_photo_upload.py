@@ -80,7 +80,10 @@ class PhotoUploadTest(TestCase):
         with patch("backend.routers.photo.decode_jwt", return_value=42), patch(
             "backend.routers.photo.extract_exif",
             return_value={"taken_at": None, "latitude": None, "longitude": None, "camera_model": None},
-        ), patch("backend.routers.photo.is_screenshot", return_value=False):
+        ), patch("backend.routers.photo.is_screenshot", return_value=False), patch(
+            "backend.routers.photo.settings.google_api_key",
+            "",
+        ):
             result = asyncio.run(photo.upload_photos([upload], authorization="Bearer token", db=db))
 
         self.assertEqual(result["uploaded"], 1)
@@ -97,6 +100,32 @@ class PhotoUploadTest(TestCase):
         self.assertEqual(saved_doc.source_id, saved_photo.id)
         self.assertEqual(saved_doc.content_type, "photo")
         self.assertIn("사진 업로드: shot.png", saved_doc.content_text)
+
+    def test_upload_stores_scene_labels_in_photo_and_document(self):
+        upload = FakeUpload("mountain.jpg", "image/jpeg", _png_bytes())
+        db = FakeSession()
+        vision = {
+            "ocr_text": None,
+            "labels": [
+                {"description": "Mountain", "score": 0.98},
+                {"description": "Sky", "score": 0.91},
+            ],
+        }
+
+        with patch("backend.routers.photo.decode_jwt", return_value=42), patch(
+            "backend.routers.photo.extract_exif",
+            return_value={"taken_at": None, "latitude": None, "longitude": None, "camera_model": None},
+        ), patch("backend.routers.photo.is_screenshot", return_value=False), patch(
+            "backend.routers.photo.settings.google_api_key",
+            "vision-key",
+        ), patch("backend.routers.photo.analyze_image_vision", return_value=vision):
+            result = asyncio.run(photo.upload_photos([upload], authorization="Bearer token", db=db))
+
+        self.assertEqual(result["results"][0]["labels"], vision["labels"])
+        saved_photo = next(item for item in db.added if isinstance(item, photo.Photo))
+        self.assertIn("Mountain", saved_photo.vision_labels)
+        saved_doc = next(item for item in db.added if isinstance(item, photo.UnifiedDocument))
+        self.assertIn("장면 키워드: Mountain, Sky", saved_doc.content_text)
 
     def test_duplicate_is_scoped_to_jwt_user_id(self):
         existing = SimpleNamespace(id=77, image_data=b"already-stored")
