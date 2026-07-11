@@ -62,25 +62,44 @@ def collect_spotify_task():
         db.close()
 
 
+# 매 실행마다 되돌아보며 재확인할 일수.
+# 크롬 익스텐션이 방문기록을 며칠 늦게/몰아서 sync해도, normalize_daily가
+# idempotent(user+source+source_id 중복 skip)라 이 창 안이면 다음 실행 때 자동으로 주워담는다.
+NORMALIZE_BACKFILL_DAYS = 7
+
+
 @celery_app.task(name="backend.tasks.collection_tasks.normalize_and_trigger")
 def normalize_and_trigger():
-    """새벽 1시: 정규화 + Phase 2 트리거 (모든 유저)"""
+    """새벽 1시: 정규화 + Phase 2 트리거 (모든 유저).
+
+    '어제 하루'만 한 번 보고 지나가면, 그 시점에 아직 도착하지 않은 원본은
+    영영 정규화되지 못한다. 그래서 최근 NORMALIZE_BACKFILL_DAYS일을 매번 재확인하고,
+    이번 실행에서 실제로 새 문서가 삽입된 (user, date)에 대해서만 Phase 2를 돌린다.
+    (이미 정규화된 날짜는 전부 중복 skip → Phase 2도 재실행하지 않는다.)
+    """
     db = SessionLocal()
     try:
         from backend.normalizer.normalize import normalize_daily
         from backend.models.user import User
         from backend.tasks.analysis_tasks import record_journal_run, run_phase2
 
-        target_date = _default_target_date()
+        latest_date = _default_target_date()  # KST 기준 어제
+        target_dates = [latest_date - timedelta(days=i) for i in range(NORMALIZE_BACKFILL_DAYS)]
         users = db.query(User).all()
+
         results = {}
+        pending_phase2 = []  # 이번에 새로 정규화된 (user_id, date)만 Phase 2 대상
         for user in users:
-            results[user.id] = normalize_daily(user_id=user.id, target_date=target_date, db=db)
+            for target_date in target_dates:
+                res = normalize_daily(user_id=user.id, target_date=target_date, db=db)
+                results[f"{user.id}:{target_date}"] = res
+                if res.get("inserted", 0) > 0:
+                    pending_phase2.append((user.id, target_date))
 
         queued = {}
-        for uid in results:
+        for uid, target_date in pending_phase2:
             task = run_phase2.delay(user_id=uid, target_date_str=str(target_date))
-            queued[uid] = task.id
+            queued[f"{uid}:{target_date}"] = task.id
             record_journal_run(
                 db,
                 user_id=uid,
@@ -91,6 +110,6 @@ def normalize_and_trigger():
             )
 
         _log_results("normalize_and_trigger", results)
-        return {"target_date": str(target_date), "normalize": results, "queued": queued}
+        return {"latest_date": str(latest_date), "normalize": results, "queued": queued}
     finally:
         db.close()
