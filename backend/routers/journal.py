@@ -1,13 +1,16 @@
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.models.journal import Journal
+from backend.models.photo import Photo
 from backend.routers.auth import decode_jwt
 
 router = APIRouter()
+KST = timezone(timedelta(hours=9))
 
 
 def _resolve_user_id(authorization: str | None) -> int:
@@ -37,4 +40,28 @@ def get_journal(
     if journal is None:
         raise HTTPException(status_code=404, detail="Journal not found for this user/date")
 
-    return journal.to_dict()
+    data = journal.to_dict()
+    day_start = datetime.combine(parsed, datetime.min.time(), tzinfo=KST)
+    day_end = day_start + timedelta(days=1)
+    photo = (
+        db.query(Photo)
+        .filter(
+            Photo.user_id == resolved_user_id,
+            Photo.taken_at >= day_start,
+            Photo.taken_at < day_end,
+            Photo.image_data.isnot(None),
+        )
+        .order_by(func.random())
+        .first()
+    )
+    if photo:
+        data["photo"] = {
+            "id": photo.id,
+            "url": f"/photos/{photo.id}/content",
+            "filename": photo.original_filename,
+            "taken_at": photo.taken_at.isoformat() if photo.taken_at else None,
+        }
+    else:
+        data["photo"] = None
+
+    return data

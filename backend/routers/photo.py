@@ -3,7 +3,7 @@ import io
 import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, Header, HTTPException, Response, UploadFile, File
 from PIL import Image
 from sqlalchemy.orm import Session
 
@@ -91,10 +91,16 @@ async def upload_photos(
             .first()
         )
         if existing:
+            if getattr(existing, "image_data", None) is None:
+                existing.image_data = content
+                existing.content_type = file.content_type
+                existing.file_size = len(content)
+                db.commit()
             results.append({
                 "filename": original_name,
                 "duplicate": True,
                 "photo_id": existing.id,
+                "image_url": f"/photos/{existing.id}/content",
             })
             continue
 
@@ -120,7 +126,9 @@ async def upload_photos(
             user_id=user_id,
             file_path=None,
             original_filename=original_name,
+            content_type=file.content_type,
             content_hash=content_hash,
+            image_data=content,
             taken_at=exif_data.get("taken_at") or now,
             latitude=exif_data.get("latitude"),
             longitude=exif_data.get("longitude"),
@@ -152,6 +160,8 @@ async def upload_photos(
 
         results.append({
             "filename": original_name,
+            "photo_id": photo.id,
+            "image_url": f"/photos/{photo.id}/content",
             "exif": exif_data,
             "screenshot": screenshot,
             "ocr_text": ocr_text,
@@ -159,3 +169,26 @@ async def upload_photos(
 
     db.commit()
     return {"uploaded": len(results), "results": results}
+
+
+@router.get("/{photo_id}/content")
+def get_photo_content(
+    photo_id: int,
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    user_id = _resolve_user_id(authorization)
+    photo = db.query(Photo).filter(Photo.id == photo_id, Photo.user_id == user_id).first()
+    if photo is None:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    if not photo.image_data:
+        raise HTTPException(status_code=404, detail="Photo image is not stored")
+
+    return Response(
+        content=photo.image_data,
+        media_type=photo.content_type or "application/octet-stream",
+        headers={
+            "Cache-Control": "private, max-age=3600",
+            "Content-Disposition": f'inline; filename="photo-{photo.id}"',
+        },
+    )

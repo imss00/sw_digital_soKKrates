@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, Float, DateTime, ForeignKey, Index
+from sqlalchemy import Column, Integer, String, Text, Float, DateTime, ForeignKey, Index, LargeBinary
 from sqlalchemy.sql import func
 
 from backend.database import Base
@@ -11,7 +11,9 @@ class Photo(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     file_path = Column(Text)
     original_filename = Column(String(255))
+    content_type = Column(String(100))
     content_hash = Column(String(64))  # 파일 바이트의 SHA256 — 자동 업로드 시 중복 방지용
+    image_data = Column(LargeBinary)
     taken_at = Column(DateTime(timezone=True))
     latitude = Column(Float)
     longitude = Column(Float)

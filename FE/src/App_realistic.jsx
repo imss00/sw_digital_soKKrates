@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from "react";
 import { fetchJournal } from "./api/journal";
-import { PHOTO_LIMITS, uploadPhotos } from "./api/photos";
+import { PHOTO_LIMITS, fetchPhotoObjectUrl, uploadPhotos } from "./api/photos";
 import {
   initAuthFromUrl,
   isLoggedIn,
@@ -319,11 +319,13 @@ function NewspaperPage({ date, onBack }) {
      music_text / music_tracks / schedule / keywords / photo_narrative 들어있음. */
   const [journal, setJournal] = useState(null);
   const [journalError, setJournalError] = useState(null);
+  const [photoObjectUrl, setPhotoObjectUrl] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
     setJournal(null);
     setJournalError(null);
+    setPhotoObjectUrl(null);
 
     fetchJournal(targetDate)
       .then((data) => {
@@ -341,6 +343,30 @@ function NewspaperPage({ date, onBack }) {
       cancelled = true;
     };
   }, [targetDate]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl = null;
+    setPhotoObjectUrl(null);
+
+    if (!journal?.photo?.id) {
+      return () => {};
+    }
+
+    fetchPhotoObjectUrl(journal.photo.id)
+      .then((url) => {
+        objectUrl = url;
+        if (!cancelled) setPhotoObjectUrl(url);
+      })
+      .catch((err) => {
+        if (!cancelled) console.error("[photo] fetch failed:", err);
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [journal?.photo?.id]);
 
   // journal 필드 → 신문 레이아웃 매핑
   const mainArticle = journal?.article_intros?.find((a) => a.is_main) ?? null;
@@ -445,16 +471,25 @@ function NewspaperPage({ date, onBack }) {
                     {mainArticle ? mainArticle.title : "Headline of the Day"}
                   </h2>
                   <figure className="news-photo">
-                    <div
-                      className="photo-area"
-                      style={{
-                        background: `linear-gradient(150deg,
-                          hsl(${(day * 37) % 360}, 18%, 62%),
-                          hsl(${(day * 37 + 30) % 360}, 22%, 38%))`,
-                      }}
-                    />
+                    {photoObjectUrl ? (
+                      <img
+                        className="photo-area photo-image"
+                        src={photoObjectUrl}
+                        alt={journal?.photo?.filename || "오늘의 사진"}
+                      />
+                    ) : (
+                      <div
+                        className="photo-area"
+                        style={{
+                          background: `linear-gradient(150deg,
+                            hsl(${(day * 37) % 360}, 18%, 62%),
+                            hsl(${(day * 37 + 30) % 360}, 22%, 38%))`,
+                        }}
+                      />
+                    )}
                     <figcaption>
                       {journal?.photo_narrative ||
+                        journal?.photo?.filename ||
                         "오늘의 대표 사진이 들어갈 자리. 캡션은 두 줄 이내로 짧게 씁니다."}
                     </figcaption>
                   </figure>
@@ -1502,6 +1537,11 @@ body { min-height: 100vh; }
   width: 100%;
   aspect-ratio: 4 / 5;
   filter: sepia(0.4) contrast(0.92) brightness(0.98);
+}
+.photo-image {
+  display: block;
+  object-fit: cover;
+  background: #ddd5c5;
 }
 .news-photo figcaption {
   font-size: 11.5px;

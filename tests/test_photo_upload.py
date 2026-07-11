@@ -84,9 +84,13 @@ class PhotoUploadTest(TestCase):
             result = asyncio.run(photo.upload_photos([upload], authorization="Bearer token", db=db))
 
         self.assertEqual(result["uploaded"], 1)
+        self.assertEqual(result["results"][0]["photo_id"], 123)
+        self.assertEqual(result["results"][0]["image_url"], "/photos/123/content")
         self.assertTrue(db.committed)
         saved_photo = next(item for item in db.added if isinstance(item, photo.Photo))
         self.assertEqual(saved_photo.user_id, 42)
+        self.assertEqual(saved_photo.image_data, upload._content)
+        self.assertEqual(saved_photo.content_type, "image/png")
         saved_doc = next(item for item in db.added if isinstance(item, photo.UnifiedDocument))
         self.assertEqual(saved_doc.user_id, 42)
         self.assertEqual(saved_doc.source, "photo")
@@ -95,7 +99,7 @@ class PhotoUploadTest(TestCase):
         self.assertIn("사진 업로드: shot.png", saved_doc.content_text)
 
     def test_duplicate_is_scoped_to_jwt_user_id(self):
-        existing = SimpleNamespace(id=77)
+        existing = SimpleNamespace(id=77, image_data=b"already-stored")
         upload = FakeUpload("dup.png", "image/png", _png_bytes())
         db = FakeSession(existing=existing)
 
@@ -105,3 +109,13 @@ class PhotoUploadTest(TestCase):
         self.assertEqual(result["results"][0]["duplicate"], True)
         self.assertEqual(result["results"][0]["photo_id"], 77)
         self.assertEqual(db.added, [])
+
+    def test_get_photo_content_requires_owner(self):
+        stored = SimpleNamespace(id=12, user_id=42, image_data=b"image-bytes", content_type="image/png")
+        db = FakeSession(existing=stored)
+
+        with patch("backend.routers.photo.decode_jwt", return_value=42):
+            response = photo.get_photo_content(12, authorization="Bearer token", db=db)
+
+        self.assertEqual(response.body, b"image-bytes")
+        self.assertEqual(response.media_type, "image/png")

@@ -40,3 +40,20 @@ export async function uploadPhotos(files) {
 
   return res.json();
 }
+
+export async function fetchPhotoObjectUrl(photoId) {
+  const authHeader = getAuthHeaderIfReal();
+  if (!authHeader) {
+    throw new Error("로그인이 필요합니다.");
+  }
+
+  const res = await fetch(`${API_BASE}/photos/${photoId}/content`, {
+    headers: authHeader,
+  });
+
+  if (!res.ok) {
+    throw new Error(`사진 불러오기 실패: HTTP ${res.status}`);
+  }
+
+  return URL.createObjectURL(await res.blob());
+}
