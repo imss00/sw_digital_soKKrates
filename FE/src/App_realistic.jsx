@@ -137,10 +137,9 @@ function MailboxCalendar({ onSelectDate, onLogout }) {
     month === today.getMonth() &&
     year === today.getFullYear();
 
-  // 오늘(또는 이미 지난 날짜)이면 편지가 꽂힌 것으로 표시.
-  // 지난 달은 전부 지난 날짜라 다 꽂혀있고, 미래 달은 하나도 안 꽂힘.
+  // 저널은 매일 "어제" 날짜 기준으로 생성되므로 오늘 날짜는 아직 열람할 수 없다.
   const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const hasLetter = (d) => new Date(year, month, d) <= todayStart;
+  const hasLetter = (d) => new Date(year, month, d) < todayStart;
 
   const pad = (n) => String(n).padStart(2, "0");
 

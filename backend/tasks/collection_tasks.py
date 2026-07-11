@@ -1,10 +1,21 @@
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from backend.tasks.celery_app import celery_app
 from backend.database import SessionLocal
 
 logger = logging.getLogger(__name__)
+KST = timezone(timedelta(hours=9))
+
+
+def _default_target_date() -> date:
+    """자동 저널은 KST 기준 어제를 대상으로 한다.
+
+    Fly 컨테이너의 시스템 timezone이 UTC여도 Celery beat는 Asia/Seoul로 돈다.
+    여기서 date.today()를 쓰면 새벽 1시 KST에 UTC 기준 날짜가 아직 전날이라
+    target_date가 하루 더 밀릴 수 있으므로 명시적으로 KST now를 사용한다.
+    """
+    return datetime.now(KST).date() - timedelta(days=1)
 
 
 def _log_results(task_name: str, results: dict) -> None:
@@ -58,17 +69,28 @@ def normalize_and_trigger():
     try:
         from backend.normalizer.normalize import normalize_daily
         from backend.models.user import User
+        from backend.tasks.analysis_tasks import record_journal_run, run_phase2
 
-        target_date = date.today() - timedelta(days=1)
+        target_date = _default_target_date()
         users = db.query(User).all()
         results = {}
         for user in users:
             results[user.id] = normalize_daily(user_id=user.id, target_date=target_date, db=db)
 
-        from backend.tasks.analysis_tasks import run_phase2
+        queued = {}
         for uid in results:
-            run_phase2.delay(user_id=uid, target_date_str=str(target_date))
+            task = run_phase2.delay(user_id=uid, target_date_str=str(target_date))
+            queued[uid] = task.id
+            record_journal_run(
+                db,
+                user_id=uid,
+                target_date=target_date,
+                status="queued",
+                stage="queued",
+                celery_task_id=task.id,
+            )
 
-        return results
+        _log_results("normalize_and_trigger", results)
+        return {"target_date": str(target_date), "normalize": results, "queued": queued}
     finally:
         db.close()

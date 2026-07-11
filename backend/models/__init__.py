@@ -7,6 +7,7 @@ from backend.models.notion_page import NotionPage
 from backend.models.photo import Photo
 from backend.models.unified_document import UnifiedDocument
 from backend.models.journal import Journal
+from backend.models.journal_run import JournalRun
 
 __all__ = [
     "User",
@@ -18,4 +19,5 @@ __all__ = [
     "Photo",
     "UnifiedDocument",
     "Journal",
+    "JournalRun",
 ]

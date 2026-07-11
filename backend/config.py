@@ -39,6 +39,7 @@ class Settings(BaseSettings):
 
     # Webhook secret (설정 시 X-Webhook-Secret 헤더 검증, 미설정 시 로컬 개발용 무인증)
     webhook_secret: str = ""
+    allow_unprotected_webhooks: bool = False
 
     # App
     app_host: str = "0.0.0.0"

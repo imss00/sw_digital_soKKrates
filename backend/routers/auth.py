@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import html
 import os
 import threading
 import time
@@ -23,6 +24,9 @@ JWT_EXPIRE_DAYS = 30
 _PKCE_TTL_SECONDS = 600
 _pkce_store: dict[str, tuple[str, float]] = {}
 _pkce_lock = threading.Lock()
+_GOOGLE_STATE_TTL_SECONDS = 600
+_google_state_store: dict[str, tuple[str, float]] = {}
+_google_state_lock = threading.Lock()
 
 
 def _issue_jwt(user_id: int) -> str:
@@ -59,6 +63,27 @@ def _pkce_pop(state: str) -> str | None:
     if time.time() > expires_at:
         return None
     return code_verifier
+
+
+def _new_oauth_state() -> str:
+    return base64.urlsafe_b64encode(os.urandom(16)).decode().rstrip("=")
+
+
+def _google_state_set(state: str, destination: str) -> None:
+    with _google_state_lock:
+        _google_state_store[state] = (destination, time.time() + _GOOGLE_STATE_TTL_SECONDS)
+
+
+def _google_state_pop(state: str) -> str | None:
+    """Google OAuth state를 1회성으로 검증하고 원래 로그인 대상을 반환한다."""
+    with _google_state_lock:
+        entry = _google_state_store.pop(state, None)
+    if entry is None:
+        return None
+    destination, expires_at = entry
+    if time.time() > expires_at:
+        return None
+    return destination
 
 
 def _find_or_create_user(db: Session, email: str, name: str) -> User:
@@ -140,6 +165,8 @@ def spotify_callback(code: str, state: str = "", db: Session = Depends(get_db)):
 @router.get("/google")
 def google_login():
     import urllib.parse
+    state = _new_oauth_state()
+    _google_state_set(state, "web")
     params = {
         "client_id": settings.google_client_id,
         "redirect_uri": settings.google_redirect_uri,
@@ -152,7 +179,7 @@ def google_login():
         ),
         "access_type": "offline",
         "prompt": "consent",
-        "state": "web",
+        "state": state,
     }
     url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params)
     return {"auth_url": url}
@@ -162,6 +189,8 @@ def google_login():
 def google_extension_login():
     """Chrome Extension 전용 Google OAuth — 완료 후 JWT를 extension-done 페이지로 전달."""
     import urllib.parse
+    state = _new_oauth_state()
+    _google_state_set(state, "extension")
     params = {
         "client_id": settings.google_client_id,
         "redirect_uri": settings.google_redirect_uri,
@@ -174,7 +203,7 @@ def google_extension_login():
         ),
         "access_type": "offline",
         "prompt": "consent",
-        "state": "extension",
+        "state": state,
     }
     url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params)
     return RedirectResponse(url=url)
@@ -183,7 +212,8 @@ def google_extension_login():
 @router.get("/extension-done", response_class=HTMLResponse)
 def extension_done(token: str):
     """Extension OAuth 완료 페이지 — auth-callback.js content script가 JWT를 읽어 저장."""
-    html = f"""<!DOCTYPE html>
+    escaped_token = html.escape(token, quote=True)
+    html_doc = f"""<!DOCTYPE html>
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
@@ -197,17 +227,21 @@ def extension_done(token: str):
   </style>
 </head>
 <body>
-  <div class="box" id="paperback-auth-done" data-token="{token}">
+  <div class="box" id="paperback-auth-done" data-token="{escaped_token}">
     <h2>로그인 완료</h2>
     <p>이 탭은 자동으로 닫힙니다.</p>
   </div>
 </body>
 </html>"""
-    return HTMLResponse(content=html)
+    return HTMLResponse(content=html_doc)
 
 
 @router.get("/google/callback")
 def google_callback(code: str, state: str = "", db: Session = Depends(get_db)):
+    destination = _google_state_pop(state)
+    if destination is None:
+        raise HTTPException(status_code=400, detail="Invalid or expired state — restart OAuth flow")
+
     resp = httpx.post(
         "https://oauth2.googleapis.com/token",
         data={
@@ -241,11 +275,11 @@ def google_callback(code: str, state: str = "", db: Session = Depends(get_db)):
     )
     db.commit()
 
-    if state == "extension":
+    if destination == "extension":
         token = _issue_jwt(user.id)
         return RedirectResponse(url=f"/auth/extension-done?token={token}")
 
-    if state == "web":
+    if destination == "web":
         token = _issue_jwt(user.id)
         return RedirectResponse(url=f"/?token={token}")
 

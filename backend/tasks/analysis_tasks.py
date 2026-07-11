@@ -5,6 +5,7 @@ webhook에서 즉시 시연용으로 트리거할 때는 정규화만 동기로 
 run_phase2.delay(...)로 큐에 넣어 비동기로 실행한다(HTTP 요청을 수 분간 붙잡지 않기 위함).
 """
 from datetime import date
+import logging
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
@@ -13,6 +14,56 @@ from sqlalchemy.sql import func
 from backend.tasks.celery_app import celery_app
 from backend.database import SessionLocal
 from backend.models.journal import Journal, JOURNAL_RESULT_FIELDS
+from backend.models.journal_run import JournalRun
+
+logger = logging.getLogger(__name__)
+
+
+def record_journal_run(
+    db: Session,
+    *,
+    user_id: int,
+    target_date: date,
+    status: str,
+    stage: str | None = None,
+    celery_task_id: str | None = None,
+    error: str | None = None,
+    journal_id: int | None = None,
+) -> None:
+    """저널 생성 실행 상태를 upsert한다.
+
+    Celery 로그만으로는 user별 실패를 나중에 찾기 어려워서, 운영 DB에
+    target_date/user_id 단위의 최신 실행 상태를 남긴다.
+    """
+    now = func.now()
+    values = {
+        "user_id": user_id,
+        "target_date": target_date,
+        "status": status,
+        "stage": stage,
+        "error": error,
+        "journal_id": journal_id,
+        "updated_at": now,
+    }
+    if celery_task_id is not None:
+        values["celery_task_id"] = celery_task_id
+    if status == "queued":
+        values["queued_at"] = now
+        values["finished_at"] = None
+    elif status == "running":
+        values["started_at"] = now
+        values["finished_at"] = None
+    elif status in {"succeeded", "failed", "skipped"}:
+        values["finished_at"] = now
+
+    stmt = pg_insert(JournalRun).values(**values)
+    update_values = {k: stmt.excluded[k] for k in values if k not in ("user_id", "target_date")}
+    stmt = stmt.on_conflict_do_update(
+        constraint="uq_journal_run_user_date",
+        set_=update_values,
+    )
+    db.execute(stmt)
+    db.commit()
 
 
 def _save_journal(user_id: int, target_date: date, journal_result: dict, db: Session) -> int:
@@ -64,20 +115,41 @@ def run_phase2_sync(user_id: int, target_date: date, db: Session) -> dict:
     from backend.analysis.recommender import run_recommendation
     from backend.analysis.journal_composer import run_journal_composition
 
+    record_journal_run(db, user_id=user_id, target_date=target_date, status="running", stage="embedding")
     embed_result = embed_and_store(user_id, target_date, db)
     # embed_and_store가 이제 "그날 문서가 아예 없음"과 "이미 다 임베딩됨"을 reason으로
     # 구분해서 반환하므로, 전자일 때만 전체 파이프라인을 건너뛴다(후자는 재트리거 시 흔하고,
     # 클러스터링~저널생성은 계속 진행해야 저널이 저장된다).
     if embed_result.get("reason") == "no documents for this day":
+        record_journal_run(
+            db,
+            user_id=user_id,
+            target_date=target_date,
+            status="skipped",
+            stage="embedding",
+            error=embed_result["reason"],
+        )
         return {"status": "skip", "reason": embed_result["reason"]}
 
+    record_journal_run(db, user_id=user_id, target_date=target_date, status="running", stage="clustering")
     cluster_result = run_clustering(user_id, target_date, db)
 
+    record_journal_run(db, user_id=user_id, target_date=target_date, status="running", stage="recommendation")
     analysis_result = run_recommendation(user_id, target_date, db)
 
+    record_journal_run(db, user_id=user_id, target_date=target_date, status="running", stage="composition")
     journal_result = run_journal_composition(user_id, target_date, analysis_result, db)
 
+    record_journal_run(db, user_id=user_id, target_date=target_date, status="running", stage="saving")
     journal_id = _save_journal(user_id, target_date, journal_result, db)
+    record_journal_run(
+        db,
+        user_id=user_id,
+        target_date=target_date,
+        status="succeeded",
+        stage="saved",
+        journal_id=journal_id,
+    )
 
     # TODO: Phase 4 — journal_result를 프린터로 전송 (python-escpos 연동 예정)
 
@@ -99,6 +171,33 @@ def run_phase2(user_id: int, target_date_str: str):
     target_date = date.fromisoformat(target_date_str)
     db = SessionLocal()
     try:
+        task_id = getattr(getattr(run_phase2, "request", None), "id", None)
+        record_journal_run(
+            db,
+            user_id=user_id,
+            target_date=target_date,
+            status="running",
+            stage="start",
+            celery_task_id=task_id,
+        )
         return run_phase2_sync(user_id, target_date, db)
+    except Exception as exc:
+        db.rollback()
+        message = f"{type(exc).__name__}: {exc}"
+        logger.exception("run_phase2 failed user_id=%s target_date=%s", user_id, target_date)
+        current_stage = (
+            db.query(JournalRun.stage)
+            .filter(JournalRun.user_id == user_id, JournalRun.target_date == target_date)
+            .scalar()
+        )
+        record_journal_run(
+            db,
+            user_id=user_id,
+            target_date=target_date,
+            status="failed",
+            stage=current_stage or "unknown",
+            error=message[:4000],
+        )
+        raise
     finally:
         db.close()

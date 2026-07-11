@@ -1,3 +1,5 @@
+import hmac
+
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
@@ -8,7 +10,14 @@ router = APIRouter()
 
 
 def _verify_secret(x_webhook_secret: str | None = Header(None)):
-    if settings.webhook_secret and x_webhook_secret != settings.webhook_secret:
+    if not settings.webhook_secret:
+        if settings.allow_unprotected_webhooks:
+            return
+        raise HTTPException(
+            status_code=503,
+            detail="WEBHOOK_SECRET is required before webhook endpoints can be used",
+        )
+    if not x_webhook_secret or not hmac.compare_digest(x_webhook_secret, settings.webhook_secret):
         raise HTTPException(status_code=401, detail="Invalid or missing X-Webhook-Secret header")
 
 
