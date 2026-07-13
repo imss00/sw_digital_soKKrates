@@ -9,6 +9,42 @@ import { getAuthHeaderIfReal } from "../auth";
 
 const API_BASE = "https://paperback-agent.fly.dev";
 
+// 구버전 journal_composer 프롬프트로 생성된 저널에는 LLM이 입력 라벨
+// ("기사 제목: ...", "기사 요약: ...")을 소개문 맨 앞에 그대로 복사해 넣은 경우가
+// 남아있다. 백엔드 Journal.to_dict()에도 같은 방어 로직이 있지만 배포가 안 되어
+// 있을 수 있으니, 프론트에서 응답을 받는 즉시 한 번 더 방어적으로 제거한다.
+const LABEL_PREFIX_RE = /^기사\s*제목\s*[:：]\s*/;
+const SUMMARY_LABEL_RE = /^\s*기사\s*요약\s*[:：]\s*[^\n]*\n*/;
+
+function stripLeakedLabel(text, title) {
+  if (!text) return text;
+  let result = text.trim();
+  const m = result.match(LABEL_PREFIX_RE);
+  if (m) {
+    result = result.slice(m[0].length);
+    if (title) {
+      const t = title.trim();
+      if (result.slice(0, t.length).toLowerCase() === t.toLowerCase()) {
+        result = result.slice(t.length);
+      }
+    }
+    result = result.replace(/^[\s"'“”·\-—]+/, "");
+  }
+  result = result.replace(SUMMARY_LABEL_RE, "");
+  return result.trim();
+}
+
+function sanitizeJournal(journal) {
+  if (!journal?.article_intros?.length) return journal;
+  return {
+    ...journal,
+    article_intros: journal.article_intros.map((item) => ({
+      ...item,
+      intro: stripLeakedLabel(item.intro, item.title),
+    })),
+  };
+}
+
 // 실제 백엔드 데이터가 준비될 때까지 화면 작업을 먼저 하기 위한 스위치.
 // true면 실제 API를 호출하지 않고 mockJournal.js의 더미 데이터를 씀.
 // 이제 DB에 실제 행(user_id=3, 2026-07-08)이 확인됐으니 false로 전환.
@@ -22,7 +58,7 @@ export async function fetchJournal(targetDate) {
   if (USE_MOCK) {
     // 실제 네트워크 요청처럼 살짝 지연을 줘서 로딩 상태도 같이 테스트 가능하게 함.
     await new Promise((resolve) => setTimeout(resolve, 300));
-    return MOCK_JOURNAL_BY_DATE[targetDate] ?? null;
+    return sanitizeJournal(MOCK_JOURNAL_BY_DATE[targetDate] ?? null);
   }
 
   const authHeader = getAuthHeaderIfReal();
@@ -37,5 +73,5 @@ export async function fetchJournal(targetDate) {
   if (!res.ok) {
     throw new Error(`journal fetch failed: HTTP ${res.status}`);
   }
-  return res.json();
+  return sanitizeJournal(await res.json());
 }

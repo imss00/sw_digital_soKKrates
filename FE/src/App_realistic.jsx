@@ -23,7 +23,6 @@ const TIMETABLE_PERIODS = [
   { label: "저녁", hours: ["18:00", "19:00", "20:00", "21:00"] },
   { label: "밤", hours: ["22:00", "23:00", "00:00"] },
 ];
-const TIMETABLE_BLANK_COLS = 6;
 
 /* ═════════════════════════════════════════════
    재사용 메이슨리(균형 2단) 레이아웃
@@ -114,6 +113,18 @@ function MasonryTwoCol({ items, gap = 32, resetKey }) {
 function formatBytes(bytes) {
   if (!bytes) return "0MB";
   return `${(bytes / 1024 / 1024).toFixed(bytes >= 1024 * 1024 ? 1 : 2)}MB`;
+}
+
+/* 인쇄 전용 레이아웃(PrintEdition)은 화면용 메이슨리처럼 내용 길이에 맞춰 늘어날 수 없고
+   고정된 종이 크기 안에 들어가야 한다. journal_composer의 LLM 프롬프트가 글자수를
+   가이드하긴 하지만(예: 메인기사 450~550자) 하드 제한은 아니라서, 혹시 넘치더라도
+   물리적 페이지를 깨지 않도록 여기서 한 번 더 안전하게 잘라준다.
+   (박스 높이는 이 소프트 가이드 기준 + 여유를 두고 잡았음 — 아래 PrintEdition 참고) */
+function truncateText(text, maxLen) {
+  if (!text) return "";
+  const trimmed = text.trim();
+  if (trimmed.length <= maxLen) return trimmed;
+  return trimmed.slice(0, maxLen - 1).trimEnd() + "…";
 }
 
 function MailboxPhotoDrop() {
@@ -301,10 +312,193 @@ function MailboxCalendar({ onSelectDate, onLogout }) {
 }
 
 /* ═════════════════════════════════════════════
+   1.5 인쇄 전용 레이아웃
+   — 화면용 메이슨리/박스 CSS를 재사용하지 않고, A3 가로 한 장을 반으로 나눈
+     고정 mm 크기 안에 맞춘 전용 마크업. 내용은 각 박스에 고정 높이를 주고,
+     넘치는 텍스트는 truncateText로 안전하게 잘라 절대 페이지 밖으로 안 넘치게 함.
+═════════════════════════════════════════════ */
+
+// journal_composer.generate_music_section()이 Spotify 청취 기록이 없을 때 고정으로
+// 내려주는 안내 문구. 인쇄판에서는 "데이터 없음"을 설명하는 문장 대신 그냥 빈칸으로
+// 둔다(오늘 다짐 박스와 같은 취급).
+const NO_MUSIC_TEXT = "어제 Spotify 청취 기록이 없어 음악 추천을 건너뜁니다.";
+
+function PrintEdition({
+  date,
+  dateLabel,
+  issueNo,
+  paperTitle,
+  journal,
+  photoObjectUrl,
+  mainArticle,
+  sideArticleLeft,
+  sideArticleRight,
+  reflectionTags,
+  scheduleRows,
+  scheduleByHour,
+}) {
+  const { day } = date;
+  const hasTracks = journal?.music_tracks?.yesterday_top?.length > 0;
+  const hasMusicText =
+    !!journal?.music_text?.yesterday_text &&
+    journal.music_text.yesterday_text !== NO_MUSIC_TEXT;
+  // 추천할 음악 데이터가 아예 없으면(어제 청취 없음) 레코드판도 같이 숨긴다.
+  const hasMusicData = hasTracks || hasMusicText;
+
+  return (
+    <div className="print-edition-wrap">
+      <div className="print-sheet">
+        {/* 1페이지: 마스트헤드 + 소제목 — 메인 기사(전문 한 박스) / 서브 기사1·2 / 날짜 */}
+        <div className="print-page print-page-left">
+          <div className="print-masthead">
+            <div className="print-mast-topline">
+              <span>No. {issueNo}</span>
+              <span>{dateLabel}</span>
+            </div>
+            <h1 className="print-mast-title">{paperTitle}</h1>
+            <div className="print-mast-rule" />
+            <p className="print-mast-sub">{date.year} · MY PERSONAL ARCHIVE</p>
+            <div className="print-mast-rule thin" />
+          </div>
+
+          <section className="print-today-comment">
+            <p className="print-today-comment-text">
+              {journal?.headline ? truncateText(journal.headline, 140) : ""}
+            </p>
+            {reflectionTags.length > 0 && (
+              <div className="print-tag-row">
+                {reflectionTags.map((tag) => (
+                  <span className="print-tag-pill" key={tag}>
+                    #{tag.replace(/\s+/g, "")}
+                  </span>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <div className="print-row-main">
+            <section className="print-box print-box-main">
+              <h2 className="print-headline-title">
+                {mainArticle ? truncateText(mainArticle.title, 40) : ""}
+              </h2>
+              <p className="print-box-text">
+                {mainArticle ? truncateText(mainArticle.intro, 1100) : ""}
+              </p>
+            </section>
+
+            <div className="print-col-sub">
+              <section className="print-box">
+                <h3 className="print-label">
+                  {sideArticleLeft ? truncateText(sideArticleLeft.title, 30) : ""}
+                </h3>
+                <p className="print-box-text">
+                  {sideArticleLeft ? truncateText(sideArticleLeft.intro, 420) : ""}
+                </p>
+              </section>
+
+              <section className="print-box">
+                <h3 className="print-label">
+                  {sideArticleRight ? truncateText(sideArticleRight.title, 30) : ""}
+                </h3>
+                <p className="print-box-text">
+                  {sideArticleRight ? truncateText(sideArticleRight.intro, 420) : ""}
+                </p>
+              </section>
+            </div>
+          </div>
+
+          <p className="print-page-footer-date">{dateLabel}</p>
+        </div>
+
+        {/* 2페이지: 오늘의 일정 / 사진 / 오늘 다짐 / 어제의 플레이리스트 — 2x2 동일 크기 그리드 */}
+        <div className="print-page print-page-right">
+          <div className="print-grid-2x2">
+            <section className="print-box print-box-schedule">
+              <h3 className="print-label">오늘의 일정</h3>
+              <ul className="print-schedule-list">
+                {scheduleRows.slice(0, 3).map((item, i) => (
+                  <li key={i}>{truncateText(item, 26) || " "}</li>
+                ))}
+              </ul>
+              <table className="print-timetable">
+                <tbody>
+                  {TIMETABLE_PERIODS.map((period) =>
+                    period.hours.map((hour, hIdx) => (
+                      <tr key={hour}>
+                        {hIdx === 0 && (
+                          <td className="print-tt-period" rowSpan={period.hours.length}>
+                            {period.label}
+                          </td>
+                        )}
+                        <td className="print-tt-hour">{hour}</td>
+                        <td className="print-tt-cell">
+                          {truncateText(scheduleByHour[hour] || "", 18)}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </section>
+
+            <section className="print-box print-box-photo">
+              {photoObjectUrl ? (
+                <img className="print-photo-img" src={photoObjectUrl} alt="오늘의 사진" />
+              ) : (
+                <div
+                  className="print-photo-img print-photo-placeholder"
+                  style={{
+                    background: `linear-gradient(150deg,
+                      hsl(${(day * 37) % 360}, 18%, 62%),
+                      hsl(${(day * 37 + 30) % 360}, 22%, 38%))`,
+                  }}
+                />
+              )}
+            </section>
+
+            <section className="print-box print-box-pledge">
+              <h3 className="print-label">오늘 다짐</h3>
+              <div className="print-pledge-divider" />
+            </section>
+
+            <section className="print-box print-box-playlist">
+              <h3 className="print-label">어제의 플레이리스트</h3>
+              {/* 추천할 음악 데이터가 없으면 레코드판까지 통째로 숨기고 오늘 다짐처럼 빈 박스로 둠 */}
+              {hasMusicData && (
+                <div className="print-playlist-body">
+                  <div className="print-vinyl">
+                    <div className="print-vinyl-label">
+                      <span>DAY</span>
+                      <strong>{String(day).padStart(2, "0")}</strong>
+                    </div>
+                  </div>
+                  <div className="print-playlist-text">
+                    <p className="print-box-text">
+                      {hasMusicText ? truncateText(journal.music_text.yesterday_text, 120) : ""}
+                    </p>
+                    {hasTracks && (
+                      <ul className="print-playlist-list">
+                        {journal.music_tracks.yesterday_top.slice(0, 4).map((t, i) => (
+                          <li key={i}>{truncateText(`${t.title} — ${t.artist}`, 30)}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              )}
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═════════════════════════════════════════════
    2. 날짜별 페이지 — 신문 컨셉
 ═════════════════════════════════════════════ */
 
-function NewspaperPage({ date, onBack }) {
+function NewspaperPage({ date, onBack, autoPrint = false }) {
   const { year, month, day } = date;
   const d = new Date(year, month, day);
   const weekday = WEEKDAYS[d.getDay()];
@@ -319,13 +513,18 @@ function NewspaperPage({ date, onBack }) {
      music_text / music_tracks / schedule / keywords / photo_narrative 들어있음. */
   const [journal, setJournal] = useState(null);
   const [journalError, setJournalError] = useState(null);
+  const [journalLoaded, setJournalLoaded] = useState(false);
   const [photoObjectUrl, setPhotoObjectUrl] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
     setJournal(null);
     setJournalError(null);
+    setJournalLoaded(false);
     setPhotoObjectUrl(null);
+    if (typeof document !== "undefined") {
+      document.body.removeAttribute("data-print-ready");
+    }
 
     fetchJournal(targetDate)
       .then((data) => {
@@ -337,12 +536,27 @@ function NewspaperPage({ date, onBack }) {
         if (cancelled) return;
         setJournalError(err.message);
         console.error("[journal] fetch failed:", err);
+      })
+      .finally(() => {
+        if (!cancelled) setJournalLoaded(true);
       });
 
     return () => {
       cancelled = true;
     };
   }, [targetDate]);
+
+  // 자동 인쇄(Playwright)용 신호: 저널 + 사진까지 다 실려서 화면이 안정된 뒤
+  // body[data-print-ready="true"]를 세팅. 헤드리스 브라우저가 이걸 보고 PDF로 캡처.
+  useEffect(() => {
+    if (!journalLoaded || typeof document === "undefined") return;
+    const needsPhoto = Boolean(journal?.photo?.id);
+    if (needsPhoto && !photoObjectUrl) return;
+    const timer = setTimeout(() => {
+      document.body.setAttribute("data-print-ready", "true");
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [journalLoaded, journal, photoObjectUrl]);
 
   useEffect(() => {
     let cancelled = false;
@@ -381,7 +595,8 @@ function NewspaperPage({ date, onBack }) {
     : [];
 
   // schedule는 텍스트 한 덩어리로 옴 — 줄바꿈/쉼표/가운뎃점 기준으로 나눠서 목록화.
-  // "일정 없음"이거나 내용이 없으면 빈 칸 3개만 보여줌.
+  // "HH:MM 제목" 형식의 실제 일정은 타임테이블의 해당 시간 칸에 직접 표시하고,
+  // 위쪽 목록은 사용자가 손으로 직접 적는 메모용으로 항상 3줄 고정.
   const scheduleText = journal?.schedule?.trim() ?? "";
   const scheduleItems =
     scheduleText && scheduleText !== "일정 없음"
@@ -390,7 +605,18 @@ function NewspaperPage({ date, onBack }) {
           .map((s) => s.trim())
           .filter(Boolean)
       : [];
-  const scheduleRows = scheduleItems.length > 0 ? scheduleItems : ["", "", ""];
+  const scheduleByHour = {};
+  scheduleItems.forEach((item) => {
+    const match = item.match(/^(\d{1,2}):(\d{2})\s*(.*)$/);
+    if (!match) return;
+    const hourKey = `${match[1].padStart(2, "0")}:00`;
+    const text = match[3].trim();
+    if (!text) return;
+    scheduleByHour[hourKey] = scheduleByHour[hourKey]
+      ? `${scheduleByHour[hourKey]}, ${text}`
+      : text;
+  });
+  const scheduleRows = ["", "", ""];
 
   // 신문 이름 — 매번 새로 정할 수 있게 클릭해서 수정, 마지막 값은 기억해둠.
   const [paperTitle, setPaperTitle] = useState(
@@ -410,9 +636,57 @@ function NewspaperPage({ date, onBack }) {
     setEditingTitle(false);
   };
 
+  // 인쇄 전용 화면(PrintEdition) 표시 여부.
+  // 수동: "인쇄하기" 버튼 클릭 시 켜짐. 자동: ?print_date로 들어온 경우(autoPrint) 처음부터 켜짐.
+  const [printMode, setPrintMode] = useState(autoPrint);
+
+  useEffect(() => {
+    if (!printMode || typeof window === "undefined") return;
+    if (autoPrint) return; // 자동 인쇄 파이프라인은 헤드리스에서 PDF만 캡처하면 됨 — window.print() 불필요
+    const frame = requestAnimationFrame(() => window.print());
+    const handleAfterPrint = () => setPrintMode(false);
+    window.addEventListener("afterprint", handleAfterPrint);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("afterprint", handleAfterPrint);
+    };
+  }, [printMode, autoPrint]);
+
+  if (printMode) {
+    return (
+      <>
+        <PrintEdition
+          date={date}
+          dateLabel={dateLabel}
+          issueNo={issueNo}
+          paperTitle={paperTitle}
+          journal={journal}
+          photoObjectUrl={photoObjectUrl}
+          mainArticle={mainArticle}
+          sideArticleLeft={sideArticleLeft}
+          sideArticleRight={sideArticleRight}
+          reflectionTags={reflectionTags}
+          scheduleRows={scheduleRows}
+          scheduleByHour={scheduleByHour}
+        />
+        {!autoPrint && (
+          <div className="page-actions">
+            <button className="back-btn" onClick={() => setPrintMode(false)}>
+              ← 미리보기 닫기
+            </button>
+            <button className="print-btn" onClick={() => window.print()}>
+              🖨 인쇄
+            </button>
+          </div>
+        )}
+      </>
+    );
+  }
+
   return (
     <div className="news-bg">
       <div className="paper-sheet">
+        <div className="front-page">
         <header className="masthead">
           <div className="mast-topline">
             <span>No. {issueNo}</span>
@@ -470,6 +744,29 @@ function NewspaperPage({ date, onBack }) {
                   <h2 className="headline">
                     {mainArticle ? mainArticle.title : "Headline of the Day"}
                   </h2>
+                  <p className="col-text">
+                    {mainArticle
+                      ? mainArticle.intro
+                      : "가운데 컬럼은 그날의 가장 큰 사건을 다루는 헤드라인 영역입니다. 사진 한 장과 짧은 기사 — 이것만으로도 하루가 충분히 기록됩니다."}
+                  </p>
+                  {mainArticle?.link && (
+                    <a
+                      className="source-link"
+                      href={mainArticle.link}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      원문 보기 ↗
+                    </a>
+                  )}
+                </section>
+              ),
+            },
+            {
+              key: "photo",
+              node: (
+                <section className="box photo-box">
+                  <h3 className="label">오늘의 사진</h3>
                   <figure className="news-photo">
                     {photoObjectUrl ? (
                       <img
@@ -487,27 +784,7 @@ function NewspaperPage({ date, onBack }) {
                         }}
                       />
                     )}
-                    <figcaption>
-                      {journal?.photo_narrative ||
-                        journal?.photo?.filename ||
-                        "오늘의 대표 사진이 들어갈 자리. 캡션은 두 줄 이내로 짧게 씁니다."}
-                    </figcaption>
                   </figure>
-                  <p className="col-text">
-                    {mainArticle
-                      ? mainArticle.intro
-                      : "가운데 컬럼은 그날의 가장 큰 사건을 다루는 헤드라인 영역입니다. 사진 한 장과 짧은 기사 — 이것만으로도 하루가 충분히 기록됩니다."}
-                  </p>
-                  {mainArticle?.link && (
-                    <a
-                      className="source-link"
-                      href={mainArticle.link}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      원문 보기 ↗
-                    </a>
-                  )}
                 </section>
               ),
             },
@@ -533,9 +810,7 @@ function NewspaperPage({ date, onBack }) {
                                 </td>
                               )}
                               <td className="tt-hour">{hour}</td>
-                              {Array.from({ length: TIMETABLE_BLANK_COLS }).map((_, i) => (
-                                <td className="tt-cell" key={i} />
-                              ))}
+                              <td className="tt-cell">{scheduleByHour[hour] || ""}</td>
                             </tr>
                           ))
                         )}
@@ -572,12 +847,12 @@ function NewspaperPage({ date, onBack }) {
                       데이터를 연결하면 이 칼럼이 그날의 이야기로 채워집니다.
                     </p>
                   )}
-                  <p className="date-stamp">{month + 1}월 {day}일 오전</p>
                 </section>
               ),
             },
           ]}
         />
+        </div>
 
         <div className="back-page">
         <MasonryTwoCol
@@ -610,7 +885,6 @@ function NewspaperPage({ date, onBack }) {
                       든 생각을 적는 칼럼입니다.
                     </p>
                   )}
-                  <p className="date-stamp">{dateLabel}</p>
                 </section>
               ),
             },
@@ -619,7 +893,7 @@ function NewspaperPage({ date, onBack }) {
               node: (
                 <section className="box">
                   <h3 className="label">하루다짐</h3>
-                  <div className="pledge-box" />
+                  <div className="pledge-divider" />
                 </section>
               ),
             },
@@ -655,7 +929,7 @@ function NewspaperPage({ date, onBack }) {
 
       <div className="page-actions">
         <button className="back-btn" onClick={onBack}>← 우편함으로</button>
-        <button className="print-btn" onClick={() => window.print()}>🖨 인쇄하기</button>
+        <button className="print-btn" onClick={() => setPrintMode(true)}>🖨 인쇄하기</button>
       </div>
     </div>
   );
@@ -695,12 +969,25 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState(null);
   const [loggedIn, setLoggedIn] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
+  const [autoPrint, setAutoPrint] = useState(false);
   const authUser = getAuthUser();
 
   useEffect(() => {
     initAuthFromUrl(); // 백엔드가 ?token=... 을 붙여 리다이렉트해오면 여기서 저장됨
     setLoggedIn(isLoggedIn());
     setAuthChecked(true);
+
+    // 자동 인쇄 파이프라인용: ?print_date=YYYY-MM-DD 로 들어오면
+    // 우편함 화면을 거치지 않고 바로 해당 날짜의 인쇄 전용 화면(PrintEdition)으로 진입.
+    const printDate = new URL(window.location.href).searchParams.get("print_date");
+    if (printDate) {
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(printDate);
+      if (match) {
+        const [, y, m, d] = match;
+        setSelectedDate({ year: Number(y), month: Number(m) - 1, day: Number(d) });
+        setAutoPrint(true);
+      }
+    }
   }, []);
 
   if (!authChecked) return null;
@@ -733,7 +1020,11 @@ export default function App() {
           }}
         />
       ) : (
-        <NewspaperPage date={selectedDate} onBack={() => setSelectedDate(null)} />
+        <NewspaperPage
+          date={selectedDate}
+          onBack={() => setSelectedDate(null)}
+          autoPrint={autoPrint}
+        />
       )}
     </>
   );
@@ -1418,19 +1709,10 @@ body { min-height: 100vh; }
   overflow: hidden;
 }
 
-/* ═══ 하루다짐: 손으로 적는 빈 줄노트 박스 ═══ */
-.pledge-box {
-  margin-top: 4px;
-  min-height: 110px;
-  border: 1px solid var(--rule);
-  background: repeating-linear-gradient(
-    to bottom,
-    transparent 0,
-    transparent 25px,
-    var(--rule) 25px,
-    var(--rule) 26px
-  );
-  opacity: 0.85;
+/* ═══ 하루다짐: 구분선만 있는 여백 ═══ */
+.pledge-divider {
+  margin-top: 2px;
+  border-top: 1px solid var(--rule);
 }
 .timetable {
   width: 100%;
@@ -1441,7 +1723,7 @@ body { min-height: 100vh; }
   border: 1px solid var(--rule);
 }
 .tt-period {
-  width: 13%;
+  width: 15%;
   text-align: center;
   vertical-align: middle;
   font-family: 'Noto Sans KR', sans-serif;
@@ -1458,7 +1740,12 @@ body { min-height: 100vh; }
   white-space: nowrap;
 }
 .tt-cell {
+  width: 70%;
   height: 17px;
+  font-family: 'Noto Sans KR', sans-serif;
+  font-size: 10.5px;
+  text-align: left;
+  padding: 0 6px;
 }
 
 .back-page { margin-top: 8px; }
@@ -1533,16 +1820,6 @@ body { min-height: 100vh; }
 .col-text.small { font-size: 12px; margin-top: 10px; }
 .col-text + .col-text { margin-top: 8px; }
 
-.date-stamp {
-  font-family: 'Playfair Display', serif;
-  font-weight: 700;
-  font-size: 17px;
-  text-align: right;
-  margin-top: 12px;
-  border-top: 1px solid var(--rule);
-  padding-top: 8px;
-}
-
 .news-photo { margin-bottom: 12px; }
 .photo-area {
   width: 100%;
@@ -1553,14 +1830,6 @@ body { min-height: 100vh; }
   display: block;
   object-fit: cover;
   background: #ddd5c5;
-}
-.news-photo figcaption {
-  font-size: 11.5px;
-  line-height: 1.6;
-  border: 1px solid var(--rule);
-  border-top: none;
-  padding: 8px 10px;
-  text-align: center;
 }
 
 .ranked-list {
@@ -1630,54 +1899,342 @@ body { min-height: 100vh; }
   .photo-submit { width: 100%; }
 }
 
-/* ═══ 인쇄용 (A4 양면 — 앞면: 마스트헤드~헤드라인 기사, 뒷면: back-page) ═══ */
+/* ═══ 인쇄 (물리 용지 설정만 — 실제 인쇄 내용은 PrintEdition 전용 마크업/CSS를 씀) ═══ */
 @media print {
   @page {
-    size: A4;
-    margin: 14mm;
+    size: A3 landscape;
+    margin: 0;
   }
-
-  body { background: #fff !important; }
-
-  /* 텍스처/노이즈/비네팅은 잉크만 낭비하고 가독성을 떨어뜨려서 인쇄 시 제거 */
-  .news-bg::before,
-  .paper-sheet::before,
-  .stripe-bg::before,
-  .stripe-bg::after {
-    display: none !important;
-  }
-
+  html, body { margin: 0 !important; background: #fff !important; }
   .page-actions { display: none !important; }
-
-  .news-bg {
-    background: none !important;
+  /* print-sheet이 물리 용지(420x297mm)와 정확히 같은 크기라서,
+     감싸는 wrap의 padding/배경이 남아있으면 페이지당 인쇄 가능 영역을 넘겨서
+     내용 일부가 다음 장으로 밀려버림(그 밀려난 조각들이 "빈칸 많은 페이지"로 보였던 원인). */
+  .print-edition-wrap {
+    min-height: 0 !important;
     padding: 0 !important;
+    background: #fff !important;
+    display: block !important;
   }
-  .paper-sheet {
-    max-width: 100%;
-    box-shadow: none !important;
-    padding: 0 !important;
-  }
+  .print-sheet { box-shadow: none !important; }
+}
 
-  /* 박스 하나가 페이지 경계에서 잘리지 않도록 — 텍스트가 끊긴 채 다음 장으로 안 넘어가게 함 */
-  .box,
-  .today-comment,
-  .masthead,
-  .news-footer,
-  figure.news-photo {
-    break-inside: avoid;
-    page-break-inside: avoid;
-  }
+/* ═════════════════════════════════════════════
+   1.5 인쇄 전용 레이아웃(PrintEdition) 전용 CSS
+   — 화면 신문 레이아웃(.box, 메이슨리 등)과 완전히 분리된, A3 가로 한 장을
+     반으로 나눈 고정 mm 크기 스타일. 절취선 기준으로 자르면 A4 낱장 두 장이 됨.
+     화면 미리보기에서도 실제 인쇄 크기 그대로 보이도록 항상 켜둠(별도 @media print 불필요).
+═════════════════════════════════════════════ */
+/* 브라우저는 기본적으로 인쇄 시 배경색/그라디언트를 생략한다(인쇄 대화상자의
+   "배경 그래픽" 옵션이 꺼져 있으면). 레코드판 그라디언트, 사진 placeholder
+   그라디언트 등이 통째로 안 보이는 문제를 막기 위해 강제로 켜둔다. */
+.print-edition-wrap, .print-edition-wrap * {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+  color-adjust: exact;
+}
+.print-edition-wrap {
+  min-height: 100vh;
+  background: #78787c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  overflow: auto;
+}
+.print-sheet {
+  width: 420mm;
+  height: 297mm;
+  flex-shrink: 0;
+  background: #fff;
+  display: flex;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.35);
+  font-family: 'Nanum Myeongjo', serif;
+  color: #1a1a1a;
+}
+.print-page {
+  width: 50%;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 10mm;
+  display: flex;
+  flex-direction: column;
+  gap: 4mm;
+  overflow: hidden;
+}
+.print-page-left {
+  border-right: 1px dashed #999;
+}
 
-  /* 뒷면 내용(사이드 기사2 + 키워드 Top5 + 플레이리스트)은 항상 다음 장(뒷면)에서 시작 */
-  .back-page {
-    break-before: page;
-    page-break-before: always;
-  }
+.print-masthead { text-align: center; }
+.print-mast-topline {
+  display: flex;
+  justify-content: space-between;
+  font-family: 'Noto Sans KR', sans-serif;
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: #555;
+  border-bottom: 1px solid #999;
+  padding-bottom: 1.5mm;
+  margin-bottom: 2mm;
+}
+.print-mast-title {
+  font-family: 'Playfair Display', serif;
+  font-weight: 900;
+  font-size: 26px;
+  letter-spacing: -0.5px;
+  line-height: 1;
+  margin: 0;
+}
+/* 화면판 마스트헤드(.mast-rule/.mast-sub)와 동일한 이중 룰선 + 자간 넓은 부제 구조를
+   그대로 축소 적용 — 인쇄판만 따로 압축된 한 줄짜리 디자인을 쓰지 않도록 통일. */
+.print-mast-rule {
+  border-top: 2px solid #333;
+  border-bottom: 1px solid #333;
+  height: 3px;
+  margin: 2mm 0 1.5mm;
+}
+.print-mast-rule.thin { border-top-width: 1px; height: 2px; margin: 1.5mm 0 0; }
+.print-mast-sub {
+  text-align: center;
+  font-family: 'Noto Sans KR', sans-serif;
+  font-size: 8px;
+  letter-spacing: 4px;
+  margin: 0;
+}
 
-  a.source-link {
-    color: var(--ink) !important;
-    text-decoration: underline;
-  }
+.print-today-comment {
+  margin-top: 2mm;
+  padding: 1mm 2mm 3mm;
+  text-align: center;
+  border-bottom: 1px solid #999;
+}
+.print-today-comment-text {
+  font-family: 'Nanum Myeongjo', serif;
+  font-style: italic;
+  font-size: 10.5px;
+  line-height: 1.6;
+  word-break: keep-all;
+  margin: 0;
+}
+.print-tag-row {
+  margin-top: 2mm;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1.5mm;
+}
+.print-tag-pill {
+  font-family: 'Noto Sans KR', sans-serif;
+  font-size: 8px;
+  letter-spacing: 0.3px;
+  color: #a33;
+  border: 1px solid #a33;
+  border-radius: 999px;
+  padding: 0.8mm 2.2mm;
+}
+
+.print-box {
+  border: 1px solid #999;
+  box-sizing: border-box;
+  padding: 3mm 4mm;
+  overflow: hidden;
+}
+.print-label {
+  font-family: 'Playfair Display', serif;
+  font-style: italic;
+  font-weight: 600;
+  font-size: 13px;
+  text-align: center;
+  margin: 0 0 2mm;
+}
+.print-box-text {
+  font-family: 'Noto Sans KR', sans-serif;
+  font-size: 11px;
+  line-height: 1.55;
+  margin: 0;
+}
+.print-headline-title {
+  font-family: 'Playfair Display', serif;
+  font-weight: 700;
+  font-size: 16px;
+  line-height: 1.3;
+  margin: 0 0 2mm;
+}
+
+/* 페이지 안쪽 큰 그리드: [왼쪽 큰 박스] + [오른쪽 위/아래 박스 두 개]
+   높이는 mm로 손으로 맞추지 않고 flex로 남는 공간을 자동 배분 —
+   페이지 자체가 297mm로 고정돼 있어서 flex 체인을 타고 절대 넘치지 않음. */
+.print-row-main {
+  display: flex;
+  flex: 2;
+  gap: 4mm;
+  min-height: 0; /* flex 자식이 내용 때문에 부모를 밀어내지 않도록 */
+}
+.print-box-main {
+  flex: 0 0 47%;
+  align-self: flex-start; /* 내용만큼만 높이 차지 — 옆 칼럼 높이까지 억지로 늘리면
+    글이 짧을 때 테두리 안에 큰 빈칸이 생김(실제로 그렇게 보여서 되돌림) */
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.print-col-sub {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4mm;
+  min-height: 0;
+}
+/* 기본값: 글 박스는 내용만큼만 높이를 차지(늘리지 않음). */
+.print-col-sub > .print-box {
+  flex: 0 0 auto;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.print-page-footer-date {
+  flex: 0 0 auto;
+  margin: 0;
+  padding-top: 1.5mm;
+  border-top: 1px solid #ccc;
+  text-align: center;
+  font-family: 'Noto Sans KR', sans-serif;
+  font-size: 9.5px;
+  letter-spacing: 1px;
+  color: #666;
+}
+
+/* 2페이지: 오늘의 일정 / 사진 / 오늘 다짐 / 어제의 플레이리스트 — 동일 크기 2x2 칸.
+   여백(일정표 빈칸, 다짐 박스 등)은 손글씨용으로 의도된 디자인. */
+.print-grid-2x2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 4mm;
+  flex: 1;
+  min-height: 0;
+}
+.print-grid-2x2 > .print-box {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.print-pledge-divider {
+  margin-top: 2mm;
+  border-top: 1px solid #999;
+  flex: 1;
+}
+
+.print-playlist-body {
+  display: flex;
+  align-items: center;
+  gap: 3mm;
+  flex: 1;
+  min-height: 0;
+}
+.print-vinyl {
+  width: 26mm;
+  aspect-ratio: 1;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 30%, rgba(255,255,255,0.12), transparent 45%),
+    repeating-radial-gradient(circle, #0e0e0e 0 0.6mm, #1c1c1c 0.6mm 1.6mm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2mm 4mm rgba(0,0,0,0.35);
+}
+.print-vinyl-label {
+  width: 44%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #d5c295, #a98f58);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Playfair Display', serif;
+  color: #2a1f0e;
+}
+.print-vinyl-label span { font-size: 5.5px; letter-spacing: 1px; }
+.print-vinyl-label strong { font-size: 11px; font-weight: 900; }
+.print-playlist-text {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.print-photo-img {
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  object-fit: cover;
+  display: block;
+}
+.print-schedule-list {
+  list-style: none;
+  margin: 0 0 2mm;
+  padding: 0;
+  font-family: 'Noto Sans KR', sans-serif;
+  font-size: 10.5px;
+  line-height: 1.5;
+  flex-shrink: 0; /* 아래 타임테이블에 밀려서 눌려 안 보이는 일이 없도록 고정 */
+}
+.print-schedule-list li {
+  min-height: 4.2mm;
+  padding-left: 3mm;
+  position: relative;
+  border-bottom: 1px dotted #999;
+}
+.print-schedule-list li::before {
+  content: "•";
+  position: absolute;
+  left: 0;
+  color: #a33;
+}
+
+.print-timetable {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-family: 'Noto Sans KR', sans-serif;
+}
+.print-timetable td {
+  border: 1px solid #ccc;
+  height: 4.1mm;
+}
+.print-tt-period {
+  width: 14%;
+  text-align: center;
+  vertical-align: middle;
+  font-size: 9px;
+}
+.print-tt-hour {
+  width: 20%;
+  font-size: 8.5px;
+  padding-left: 2mm;
+}
+.print-tt-cell {
+  font-size: 8px;
+  padding-left: 1.5mm;
+}
+
+.print-playlist-list {
+  list-style: none;
+  margin: 2mm 0 0;
+  padding: 0;
+  font-family: 'Noto Sans KR', sans-serif;
+  font-size: 10.5px;
+  line-height: 1.6;
 }
 `;
