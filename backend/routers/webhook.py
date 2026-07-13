@@ -34,11 +34,14 @@ def trigger_spotify(
 @router.post("/collect/calendar")
 def trigger_calendar(
     user_id: int = 1,
+    target_date: str | None = None,
     db: Session = Depends(get_db),
     _: None = Depends(_verify_secret),
 ):
+    from datetime import date
     from backend.collectors.calendar_collector import collect_calendar
-    return collect_calendar(user_id=user_id, db=db)
+    parsed = date.fromisoformat(target_date) if target_date else None
+    return collect_calendar(user_id=user_id, db=db, target_date=parsed)
 
 
 @router.post("/collect/notion")
@@ -83,14 +86,25 @@ def trigger_generate_journal(
     Phase 2-3는 기존 celery task(run_phase2)에 위임한 뒤 즉시 응답한다.
     완료 여부는 GET /journal/{target_date}로 폴링해서 확인하면 된다(완료 전엔 404).
     """
-    from datetime import date, timedelta
+    from datetime import date, datetime, timedelta, timezone
+    from backend.collectors.calendar_collector import collect_calendar
     from backend.normalizer.normalize import normalize_daily
     from backend.tasks.analysis_tasks import run_phase2
 
-    parsed = date.fromisoformat(target_date) if target_date else date.today() - timedelta(days=1)
+    kst = timezone(timedelta(hours=9))
+    parsed = date.fromisoformat(target_date) if target_date else datetime.now(kst).date() - timedelta(days=1)
+    calendar_results = {
+        parsed.isoformat(): collect_calendar(user_id=user_id, db=db, target_date=parsed),
+        (parsed + timedelta(days=1)).isoformat(): collect_calendar(
+            user_id=user_id,
+            db=db,
+            target_date=parsed + timedelta(days=1),
+        ),
+    }
     normalize_result = normalize_daily(user_id=user_id, target_date=parsed, db=db)
     task = run_phase2.delay(user_id=user_id, target_date_str=parsed.isoformat())
     return {
+        "calendar": calendar_results,
         "normalize": normalize_result,
         "phase2": {"status": "queued", "task_id": task.id},
         "poll": f"/journal/{parsed.isoformat()}?user_id={user_id}",

@@ -18,6 +18,11 @@ def _default_target_date() -> date:
     return datetime.now(KST).date() - timedelta(days=1)
 
 
+def _calendar_collection_dates(target_date: date) -> list[date]:
+    """저널 회고일과 저널에 표시할 다음날 일정을 함께 수집한다."""
+    return [target_date, target_date + timedelta(days=1)]
+
+
 def _log_results(task_name: str, results: dict) -> None:
     errors = {uid: r for uid, r in results.items() if r.get("status") == "error"}
     if errors:
@@ -28,16 +33,22 @@ def _log_results(task_name: str, results: dict) -> None:
 
 @celery_app.task(name="backend.tasks.collection_tasks.collect_daily")
 def collect_daily():
-    """자정 30분: Google Calendar 수집 (Google token 있는 모든 유저)"""
+    """자정 30분: Google Calendar 수집 (Google token 있는 모든 유저)."""
     db = SessionLocal()
     try:
         from backend.collectors.calendar_collector import collect_calendar
         from backend.models.user import User
 
         users = db.query(User).filter(User.google_refresh_token.isnot(None)).all()
+        target_dates = _calendar_collection_dates(_default_target_date())
         results = {}
         for user in users:
-            results[user.id] = collect_calendar(user_id=user.id, db=db)
+            for target_date in target_dates:
+                results[f"{user.id}:{target_date}"] = collect_calendar(
+                    user_id=user.id,
+                    db=db,
+                    target_date=target_date,
+                )
         _log_results("collect_daily", results)
         return results
     finally:

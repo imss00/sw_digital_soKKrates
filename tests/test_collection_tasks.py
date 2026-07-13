@@ -15,3 +15,10 @@ class CollectionTasksTest(TestCase):
 
         with patch.object(collection_tasks, "datetime", FakeDatetime):
             self.assertEqual(str(collection_tasks._default_target_date()), "2026-07-10")
+
+    def test_calendar_collection_dates_include_journal_date_and_next_day(self):
+        target_date = datetime(2026, 7, 10, tzinfo=collection_tasks.KST).date()
+
+        dates = collection_tasks._calendar_collection_dates(target_date)
+
+        self.assertEqual([str(d) for d in dates], ["2026-07-10", "2026-07-11"])
