@@ -333,6 +333,7 @@ function PrintEdition({
   mainArticle,
   sideArticleLeft,
   sideArticleRight,
+  sideArticleBelowMain,
   reflectionTags,
   scheduleRows,
   scheduleByHour,
@@ -377,14 +378,28 @@ function PrintEdition({
           </section>
 
           <div className="print-row-main">
-            <section className="print-box print-box-main">
-              <h2 className="print-headline-title">
-                {mainArticle ? truncateText(mainArticle.title, 40) : ""}
-              </h2>
-              <p className="print-box-text">
-                {mainArticle ? truncateText(mainArticle.intro, 1100) : ""}
-              </p>
-            </section>
+            {/* 왼쪽 칼럼: 메인 기사 + 4번째 기사(메인 바로 아래) */}
+            <div className="print-col-main">
+              <section className="print-box print-box-main">
+                <h2 className="print-headline-title">
+                  {mainArticle ? truncateText(mainArticle.title, 40) : ""}
+                </h2>
+                <p className="print-box-text">
+                  {mainArticle ? truncateText(mainArticle.intro, 650) : ""}
+                </p>
+              </section>
+
+              <section className="print-box">
+                <h3 className="print-label">
+                  {sideArticleBelowMain ? truncateText(sideArticleBelowMain.title, 30) : ""}
+                </h3>
+                <p className="print-box-text">
+                  {sideArticleBelowMain
+                    ? truncateText(sideArticleBelowMain.intro, 420)
+                    : ""}
+                </p>
+              </section>
+            </div>
 
             <div className="print-col-sub">
               <section className="print-box">
@@ -587,6 +602,8 @@ function NewspaperPage({ date, onBack, autoPrint = false }) {
   const sideArticles = journal?.article_intros?.filter((a) => !a.is_main) ?? [];
   const sideArticleLeft = sideArticles[0] ?? null;
   const sideArticleRight = sideArticles[1] ?? null;
+  // 4번째 기사 — 인쇄판에서는 메인 기사 바로 아래(왼쪽 칼럼)에 배치.
+  const sideArticleBelowMain = sideArticles[2] ?? null;
   const reflectionTags = journal?.reflection
     ? journal.reflection
         .split("/")
@@ -665,6 +682,7 @@ function NewspaperPage({ date, onBack, autoPrint = false }) {
           mainArticle={mainArticle}
           sideArticleLeft={sideArticleLeft}
           sideArticleRight={sideArticleRight}
+          sideArticleBelowMain={sideArticleBelowMain}
           reflectionTags={reflectionTags}
           scheduleRows={scheduleRows}
           scheduleByHour={scheduleByHour}
@@ -889,9 +907,39 @@ function NewspaperPage({ date, onBack, autoPrint = false }) {
               ),
             },
             {
-              key: "pledge",
+              key: "side-below-main",
               node: (
                 <section className="box">
+                  <h3 className="label">
+                    {sideArticleBelowMain ? sideArticleBelowMain.title : "사이드 기사"}
+                  </h3>
+                  {sideArticleBelowMain ? (
+                    <>
+                      <p className="col-text">{sideArticleBelowMain.intro}</p>
+                      {sideArticleBelowMain.link && (
+                        <a
+                          className="source-link"
+                          href={sideArticleBelowMain.link}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          원문 보기 ↗
+                        </a>
+                      )}
+                    </>
+                  ) : (
+                    <p className="col-text">
+                      네 번째 기사 칼럼입니다. 날짜별 데이터를 연결하면 이 칼럼이
+                      그날의 이야기로 채워집니다.
+                    </p>
+                  )}
+                </section>
+              ),
+            },
+            {
+              key: "pledge",
+              node: (
+                <section className="box box-pledge">
                   <h3 className="label">하루다짐</h3>
                   <div className="pledge-divider" />
                 </section>
@@ -964,6 +1012,11 @@ function LoginScreen({ onLogin }) {
 /* ═════════════════════════════════════════════
    앱 루트
 ═════════════════════════════════════════════ */
+
+// test/main.jsx가 로그인 없이 바로 우편함부터 테스트할 수 있도록 컴포넌트를
+// 그대로 재사용한다. 실제 배포 진입점(src/index.jsx)은 아래 default export(App)를
+// 쓰고, 테스트 진입점은 이 named export들을 써서 같은 소스를 공유한다.
+export { MailboxCalendar, NewspaperPage, css };
 
 export default function App() {
   const [selectedDate, setSelectedDate] = useState(null);
@@ -1713,6 +1766,10 @@ body { min-height: 100vh; }
 .pledge-divider {
   margin-top: 2px;
   border-top: 1px solid var(--rule);
+  /* 옆 칼럼 높이에 여유가 없으면 메이슨리 stretch가 거의 안 먹혀서 손글씨 쓸
+     공간이 사실상 사라짐 — 최소 높이를 직접 보장해 항상 빈칸이 보이게 함.
+     (stretch로 더 늘어날 여유가 있으면 flex:1인 부모 박스를 따라 더 커짐) */
+  min-height: 200px;
 }
 .timetable {
   width: 100%;
@@ -1823,7 +1880,7 @@ body { min-height: 100vh; }
 .news-photo { margin-bottom: 12px; }
 .photo-area {
   width: 100%;
-  aspect-ratio: 4 / 5;
+  aspect-ratio: 4 / 3; /* 4:5(세로형)에서 낮춤 — 박스 높이를 줄여 다른 박스와 배치가 빡빡해지지 않게 */
   filter: sepia(0.4) contrast(0.92) brightness(0.98);
 }
 .photo-image {
@@ -2071,10 +2128,18 @@ body { min-height: 100vh; }
   gap: 4mm;
   min-height: 0; /* flex 자식이 내용 때문에 부모를 밀어내지 않도록 */
 }
-.print-box-main {
+/* 왼쪽 칼럼(메인 기사 + 4번째 기사)과 오른쪽 칼럼(사이드 기사 2개)을
+   같은 구조로 맞춤 — 둘 다 내용만큼만 높이를 차지하는 박스 스택. */
+.print-col-main {
   flex: 0 0 47%;
-  align-self: flex-start; /* 내용만큼만 높이 차지 — 옆 칼럼 높이까지 억지로 늘리면
-    글이 짧을 때 테두리 안에 큰 빈칸이 생김(실제로 그렇게 보여서 되돌림) */
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4mm;
+  min-height: 0;
+}
+.print-col-main > .print-box {
+  flex: 0 0 auto;
   max-height: 100%;
   display: flex;
   flex-direction: column;

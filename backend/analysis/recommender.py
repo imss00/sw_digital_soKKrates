@@ -363,7 +363,9 @@ def run_recommendation(user_id: int, target_date: date, db: Session) -> dict:
                 queries.append(user_vectors.mean(axis=0))
 
             if queries and article_embeddings.size:
-                recommended_articles = recommend_articles_multi(queries, article_embeddings, articles)
+                recommended_articles = recommend_articles_multi(
+                    queries, article_embeddings, articles, top_k=4
+                )
             else:
                 recommended_articles = []
         else:
