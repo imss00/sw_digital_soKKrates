@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
@@ -16,8 +16,12 @@ logger = logging.getLogger(__name__)
 KST = timezone(timedelta(hours=9))
 
 
-def collect_calendar(user_id: int, db: Session) -> dict:
-    """어제의 Google Calendar 이벤트 수집"""
+def collect_calendar(user_id: int, db: Session, target_date: date | None = None) -> dict:
+    """Google Calendar 이벤트를 하루 단위로 수집한다.
+
+    target_date를 생략하면 기존 동작과 같이 KST 기준 어제를 수집한다.
+    저널 생성은 target_date+1의 일정도 필요로 하므로 호출자가 날짜를 명시할 수 있어야 한다.
+    """
     user = db.query(User).filter(User.id == user_id).first()
     if not user or not user.google_refresh_token:
         return {"status": "skip", "reason": "no google token"}
@@ -32,15 +36,16 @@ def collect_calendar(user_id: int, db: Session) -> dict:
 
     service = build("calendar", "v3", credentials=creds)
 
-    now = datetime.now(KST)
-    yesterday_start = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    yesterday_end = yesterday_start + timedelta(days=1)
+    if target_date is None:
+        target_date = datetime.now(KST).date() - timedelta(days=1)
+    day_start = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=KST)
+    day_end = day_start + timedelta(days=1)
 
     try:
         events_result = service.events().list(
             calendarId="primary",
-            timeMin=yesterday_start.isoformat(),
-            timeMax=yesterday_end.isoformat(),
+            timeMin=day_start.isoformat(),
+            timeMax=day_end.isoformat(),
             singleEvents=True,
             orderBy="startTime",
         ).execute()
@@ -49,6 +54,7 @@ def collect_calendar(user_id: int, db: Session) -> dict:
         return {"status": "error", "reason": str(e)}
 
     inserted = 0
+    updated = 0
     for event in events_result.get("items", []):
         if event.get("status") == "cancelled":
             continue
@@ -71,6 +77,15 @@ def collect_calendar(user_id: int, db: Session) -> dict:
             .first()
         )
         if existing:
+            existing.summary = event.get("summary", "")
+            existing.description = event.get("description")
+            existing.start_time = start_time
+            existing.end_time = end_time
+            existing.duration_min = duration_min
+            existing.location = event.get("location")
+            existing.is_recurring = "recurringEventId" in event
+            existing.attendee_count = len(event.get("attendees", []))
+            updated += 1
             continue
 
         entry = CalendarEvent(
@@ -89,4 +104,4 @@ def collect_calendar(user_id: int, db: Session) -> dict:
         inserted += 1
 
     db.commit()
-    return {"status": "ok", "inserted": inserted}
+    return {"status": "ok", "inserted": inserted, "updated": updated, "date": target_date.isoformat()}
