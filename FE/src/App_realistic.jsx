@@ -1054,6 +1054,7 @@ export default function App() {
             await startGoogleOAuthLogin();
           }}
         />
+        <ScrollNudge />
       </>
     );
   }
@@ -1079,7 +1080,66 @@ export default function App() {
           autoPrint={autoPrint}
         />
       )}
+      <ScrollNudge />
     </>
+  );
+}
+
+/* ═════════════════════════════════════════════
+   Dacon 코드공유 등 iframe 임베드에서 마우스 휠/트랙패드 스크롤이
+   막히는 경우를 위한 우회용 스크롤 버튼.
+   window.scrollBy는 스크립트로 직접 스크롤 위치를 옮기는 것이라
+   휠 이벤트가 막힌 상황에서도 동작할 가능성이 있음.
+═════════════════════════════════════════════ */
+function ScrollNudge() {
+  const scrollBy = (amount) => {
+    window.scrollBy({ top: amount, behavior: "smooth" });
+  };
+  const scrollToEdge = (edge) => {
+    const target = edge === "top" ? 0 : document.documentElement.scrollHeight;
+    window.scrollTo({ top: target, behavior: "smooth" });
+  };
+  return (
+    <div className="scroll-nudge" aria-hidden={false}>
+      <button
+        type="button"
+        className="scroll-nudge-btn"
+        onClick={() => scrollToEdge("top")}
+        onDoubleClick={() => scrollToEdge("top")}
+        title="맨 위로"
+        aria-label="맨 위로 스크롤"
+      >
+        ▲▲
+      </button>
+      <button
+        type="button"
+        className="scroll-nudge-btn"
+        onClick={() => scrollBy(-400)}
+        title="위로"
+        aria-label="위로 스크롤"
+      >
+        ▲
+      </button>
+      <button
+        type="button"
+        className="scroll-nudge-btn"
+        onClick={() => scrollBy(400)}
+        title="아래로"
+        aria-label="아래로 스크롤"
+      >
+        ▼
+      </button>
+      <button
+        type="button"
+        className="scroll-nudge-btn"
+        onClick={() => scrollToEdge("bottom")}
+        onDoubleClick={() => scrollToEdge("bottom")}
+        title="맨 아래로"
+        aria-label="맨 아래로 스크롤"
+      >
+        ▼▼
+      </button>
+    </div>
   );
 }
 
@@ -1471,6 +1531,36 @@ body { min-height: 100vh; }
   font-size: 12px;
   letter-spacing: 0.2px;
   backdrop-filter: blur(8px);
+}
+
+/* ═══ 스크롤 우회 버튼 (iframe 임베드용) ═══ */
+.scroll-nudge {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 99999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.scroll-nudge-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(24, 22, 20, 0.82);
+  color: #fdfcfa;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+.scroll-nudge-btn:hover {
+  background: rgba(24, 22, 20, 0.95);
+}
+.scroll-nudge-btn:active {
+  transform: scale(0.92);
 }
 
 /* ═══ 로그인 화면 ═══ */
