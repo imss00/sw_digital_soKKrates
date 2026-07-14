@@ -18,6 +18,11 @@ def _default_target_date() -> date:
     return datetime.now(KST).date() - timedelta(days=1)
 
 
+def default_target_date() -> date:
+    """다른 모듈(예: 자동 인쇄 파이프라인)에서 쓰는 공개 진입점. _default_target_date의 별칭."""
+    return _default_target_date()
+
+
 def _log_results(task_name: str, results: dict) -> None:
     errors = {uid: r for uid, r in results.items() if r.get("status") == "error"}
     if errors:

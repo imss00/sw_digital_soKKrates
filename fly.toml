@@ -22,7 +22,9 @@ primary_region = "nrt"
     timeout = "20s"
 
 [[vm]]
-  memory = "512mb"
+  # 자동 인쇄가 헤드리스 크로미움(Playwright)을 띄우면서 uvicorn+celery와 같이 도니까
+  # 512mb로는 OOM 날 수 있어서 1024mb로 올림. (자동 인쇄 안 쓰면 512mb로 되돌려도 됨)
+  memory = "1024mb"
   cpu_kind = "shared"
   cpus = 1
   count = 1

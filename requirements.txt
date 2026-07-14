@@ -42,3 +42,6 @@ Pillow==10.4.0
 
 # Utilities
 structlog==24.4.0
+
+# 자동 인쇄 (신문 페이지 → PDF 렌더링용 헤드리스 브라우저)
+playwright==1.47.0

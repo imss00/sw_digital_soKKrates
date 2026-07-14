@@ -41,6 +41,14 @@ class Settings(BaseSettings):
     webhook_secret: str = ""
     allow_unprotected_webhooks: bool = False
 
+    # 자동 인쇄 (매일 아침 신문을 PDF로 렌더해 프린터 이메일로 발송)
+    print_enabled: bool = False
+    frontend_base_url: str = "https://paperback-agent.fly.dev"
+    resend_api_key: str = ""
+    print_from_email: str = "PaperBack Agent <onboarding@resend.dev>"
+    printer_email: str = ""
+    print_user_id: int = 0
+
     # App
     app_host: str = "0.0.0.0"
     app_port: int = 8000

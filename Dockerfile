@@ -22,6 +22,9 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# 자동 인쇄용 헤드리스 크로미움 (playwright install-deps가 apt 의존성까지 같이 설치)
+RUN playwright install --with-deps chromium
+
 COPY . .
 
 COPY --from=frontend-builder /frontend/dist ./FE/dist

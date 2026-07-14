@@ -37,6 +37,11 @@ def _issue_jwt(user_id: int) -> str:
     return pyjwt.encode(payload, settings.jwt_secret_key, algorithm=JWT_ALGORITHM)
 
 
+def issue_jwt_for_user(user_id: int) -> str:
+    """다른 모듈(예: 자동 인쇄 파이프라인)에서 이 유저용 로그인 JWT를 발급할 때 쓰는 공개 진입점."""
+    return _issue_jwt(user_id)
+
+
 def decode_jwt(token: str) -> int:
     """JWT에서 user_id 추출. 유효하지 않으면 HTTPException 발생."""
     try:

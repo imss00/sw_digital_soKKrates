@@ -16,7 +16,11 @@ def _dispose_engine_after_fork(**kwargs):
     engine.dispose()
 
 celery_app.conf.update(
-    imports=("backend.tasks.collection_tasks", "backend.tasks.analysis_tasks"),
+    imports=(
+        "backend.tasks.collection_tasks",
+        "backend.tasks.analysis_tasks",
+        "backend.tasks.print_tasks",
+    ),
     timezone="Asia/Seoul",
     enable_utc=False,
     beat_schedule={
@@ -31,6 +35,10 @@ celery_app.conf.update(
         "spotify-polling": {
             "task": "backend.tasks.collection_tasks.collect_spotify_task",
             "schedule": crontab(minute=0, hour="*/4"),
+        },
+        "daily-print": {
+            "task": "backend.tasks.print_tasks.print_daily_newspaper",
+            "schedule": crontab(hour=6, minute=0),
         },
     },
 )
