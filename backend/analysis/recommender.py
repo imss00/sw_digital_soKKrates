@@ -114,7 +114,7 @@ def recommend_articles_multi(
     query_vectors: list,
     article_embeddings: np.ndarray,
     articles: list[dict],
-    top_k: int = 3,
+    top_k: int = 4,
 ) -> list[dict]:
     """
     여러 관심 질의(HyDE 테마 + 관심 군집별 centroid)로 기사를 뽑아 다양성을 확보한다.
